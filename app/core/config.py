@@ -20,6 +20,7 @@ class Settings:
     OPENROUTER_API_KEY: str | None = os.getenv("OPENROUTER_API_KEY")
     OPENROUTER_MODEL_PRIMARY: str = os.getenv("OPENROUTER_MODEL_PRIMARY", "openai/gpt-4o-mini")
     OPENROUTER_MODEL_FALLBACK: str = os.getenv("OPENROUTER_MODEL_FALLBACK", "google/gemini-1.5-flash")
+    OPENROUTER_VISION_MODEL: str = os.getenv("OPENROUTER_VISION_MODEL", "openai/gpt-4o-mini")
 
     # -------------------------
     # WeKnora
