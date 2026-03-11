@@ -21,6 +21,35 @@ services:
       retries: 5
 
   # -------------------------
+  # EMQX (MQTT Broker)
+  # -------------------------
+  emqx:
+    image: emqx:5.8.4
+    container_name: emqx
+    ports:
+      - "1883:1883"
+      - "8083:8083"
+      - "8084:8084"
+      - "8883:8883"
+      - "18083:18083"
+    environment:
+      - EMQX_NAME=emqx
+      - EMQX_HOST=127.0.0.1
+    volumes:
+      - emqx_data:/opt/emqx/data
+      - emqx_log:/opt/emqx/log
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/opt/emqx/bin/emqx", "ctl", "status"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    networks:
+      - default
+      - weknora_WeKnora-network
+
+  # -------------------------
   # FastAPI AI Engine
   # -------------------------
   ai_engine:
@@ -29,6 +58,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      emqx:
+        condition: service_healthy
     env_file:
       - .env
     environment:
@@ -36,6 +67,8 @@ services:
       DB_PORT: 5432
       WEKNORA_APP_HOST: WeKnora-app
       WEKNORA_APP_PORT: 8080
+      MQTT_HOST: emqx
+      MQTT_PORT: 1883
     ports:
       - "8001:8000"
     restart: unless-stopped
@@ -45,6 +78,8 @@ services:
 
 volumes:
   postgres_data:
+  emqx_data:
+  emqx_log:
 
 networks:
   default:

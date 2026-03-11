@@ -31,6 +31,14 @@ class Settings:
     WEKNORA_KB_ID: str | None = os.getenv("WEKNORA_KB_ID") or None
 
     # -------------------------
+    # MQTT (EMQX)
+    # -------------------------
+    MQTT_HOST: str = os.getenv("MQTT_HOST", "emqx")
+    MQTT_PORT: int = int(os.getenv("MQTT_PORT", "1883"))
+    MQTT_USERNAME: str = os.getenv("MQTT_USERNAME", "admin")
+    MQTT_PASSWORD: str = os.getenv("MQTT_PASSWORD", "public")
+
+    # -------------------------
     # App
     # -------------------------
     MAX_HISTORY_MESSAGES: int = int(os.getenv("MAX_HISTORY_MESSAGES", "6"))
