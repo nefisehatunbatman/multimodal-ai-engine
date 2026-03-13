@@ -36,7 +36,7 @@ def build_base_history_messages(history: List[Message]) -> List[Dict[str, str]]:
             llm_messages.append({"role": m.role, "content": m.content})
     return llm_messages
 
-#halusinasyınları vs engellemek icin prompt yazdik
+#halusinasyonlari vs engellemek icin prompt yazdik llme kim oldugunu soyluyoruz
 def build_system_prompt() -> str:
     base = DEFAULT_SYSTEM_PROMPT.strip()
     rag_rules = """
@@ -134,7 +134,7 @@ async def call_openrouter_stream(messages: List[Dict[str, str]]):
         async with client.stream("POST", url, headers=headers, json=payload) as r:
             r.raise_for_status()
             async for line in r.aiter_lines():#satir satir oku
-                if not line.startswith("data:"):#openrouterda stream yanitisi sse standardinda gelir ve bu format data ile baslar data ile baslamayn satirlarin islevi farklidir biz data ile baslayanlari aliyoruz digerlerin iatliyoruz
+                if not line.startswith("data:"):#openrouterda stream yaniti sse standardinda gelir ve bu format data ile baslar data ile baslamayn satirlarin islevi farklidir biz data ile baslayanlari aliyoruz digerlerin iatliyoruz
                     continue
                 data_str = line[5:].strip()
                 if data_str == "[DONE]":
@@ -145,7 +145,7 @@ async def call_openrouter_stream(messages: List[Dict[str, str]]):
                     import json
                     chunk = json.loads(data_str)
                     delta = chunk.get("choices", [{}])[0].get("delta", {})
-                    token = delta.get("content")#stremada her chunck tam mesaj degil oncei mesajdan bir fark delta icerir
+                    token = delta.get("content")#stremada her chunck tam mesaj degil onceki mesajdan bir fark yani delta icerir
                     if token:
                         yield token
                 except Exception:

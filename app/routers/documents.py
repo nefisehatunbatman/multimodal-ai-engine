@@ -19,7 +19,7 @@ ALLOWED_IMAGE_MIME_TYPES = {
     ".webp": "image/webp",
 }
 
-
+#dosya uzantisini kontrol ederiz
 def validate_file_extension(filename: str | None) -> str:
     suffix = Path(filename or "").suffix.lower()
     if suffix not in ALLOWED_EXTENSIONS:
