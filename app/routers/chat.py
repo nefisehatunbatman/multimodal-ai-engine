@@ -29,14 +29,14 @@ DEFAULT_SYSTEM_PROMPT = getattr(settings, "DEFAULT_SYSTEM_PROMPT", None) or "You
 MAX_HISTORY_MESSAGES = int(getattr(settings, "MAX_HISTORY_MESSAGES", 6))
 
 
-def build_base_history_messages(history: List[Message]) -> List[Dict[str, str]]:
+def build_base_history_messages(history: List[Message]) -> List[Dict[str, str]]:#sqlalchemy nesnelerini openrouterin anlayacagi sekilde dict nesnelerine donusturuyoruz
     llm_messages: List[Dict[str, str]] = []
     for m in history:
         if m.role in ("user", "assistant") and m.content:
             llm_messages.append({"role": m.role, "content": m.content})
     return llm_messages
 
-
+#halusinasyınları vs engellemek icin prompt yazdik
 def build_system_prompt() -> str:
     base = DEFAULT_SYSTEM_PROMPT.strip()
     rag_rules = """
@@ -48,7 +48,7 @@ Cevabı mümkün olduğunca bağlamdaki ifadeye sadık ve net ver.
 """.strip()
     return f"{base}\n\n{rag_rules}"
 
-
+#openrouterdan gelen cevabin icinden contexti cekiyoruz
 def _safe_extract_assistant_text(data: Dict[str, Any]) -> str:
     try:
         choices = data.get("choices")
@@ -63,7 +63,7 @@ def _safe_extract_assistant_text(data: Dict[str, Any]) -> str:
         if isinstance(content, str):
             return content.strip()
         if isinstance(content, list):
-            parts: List[str] = []
+            parts: List[str] = []#vision modellerde icerik string yerine liste olur
             for item in content:
                 if isinstance(item, dict):
                     text = item.get("text")
@@ -73,9 +73,9 @@ def _safe_extract_assistant_text(data: Dict[str, Any]) -> str:
                 return "\n".join(parts)
         return str(content).strip()
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"LLM response parse error: {e}")
+        raise HTTPException(status_code=502, detail=f"LLM response parse error: {e}")#biz bir sunucuya yonlendirdik bizden kaynakli hata
 
-
+#pyhton exceptionu meta jsonb alanina kaydetmek icin dict formatina donusturuyoruz ne tur hata oldugunu veri tabaninda saklamak icin
 def _error_to_meta(e: Exception) -> Dict[str, Any]:
     text = str(e)
     if len(text) > 2000:
@@ -95,9 +95,9 @@ async def call_openrouter(messages: List[Dict[str, str]]) -> Dict[str, Any]:
     payload = {
         "model": settings.OPENROUTER_MODEL_PRIMARY or "openai/gpt-4o-mini",
         "messages": messages,
-        "temperature": 0.2,
+        "temperature": 0.2,#llmin yaraticilik seviyesi 0.0 determinsitik 1.0 cok yaratici
     }
-
+#with ile blok bitince clientin kapatilip baglantinin serbest kalmasini saglariz
     try:
         async with httpx.AsyncClient(timeout=60) as client:
             r = await client.post(url, headers=headers, json=payload)
@@ -127,14 +127,14 @@ async def call_openrouter_stream(messages: List[Dict[str, str]]):
         "model": settings.OPENROUTER_MODEL_PRIMARY or "openai/gpt-4o-mini",
         "messages": messages,
         "temperature": 0.2,
-        "stream": True,
+        "stream": True,#cevabi toplu gonderme token geldikce gönder
     }
 
     async with httpx.AsyncClient(timeout=60) as client:
         async with client.stream("POST", url, headers=headers, json=payload) as r:
             r.raise_for_status()
-            async for line in r.aiter_lines():
-                if not line.startswith("data:"):
+            async for line in r.aiter_lines():#satir satir oku
+                if not line.startswith("data:"):#openrouterda stream yanitisi sse standardinda gelir ve bu format data ile baslar data ile baslamayn satirlarin islevi farklidir biz data ile baslayanlari aliyoruz digerlerin iatliyoruz
                     continue
                 data_str = line[5:].strip()
                 if data_str == "[DONE]":
@@ -145,7 +145,7 @@ async def call_openrouter_stream(messages: List[Dict[str, str]]):
                     import json
                     chunk = json.loads(data_str)
                     delta = chunk.get("choices", [{}])[0].get("delta", {})
-                    token = delta.get("content")
+                    token = delta.get("content")#stremada her chunck tam mesaj degil oncei mesajdan bir fark delta icerir
                     if token:
                         yield token
                 except Exception:
@@ -209,7 +209,7 @@ async def chat(payload: ChatRequest, db: Session = Depends(get_db)):
         .all()
     )[::-1]
 
-    context = await retrieve_context(payload.message)
+    context = await retrieve_context(payload.message)#weknoraya istek atip ilgili chuncklari donduruyoruz
     llm_messages = _build_llm_messages(history, payload.message, context)
 
     assistant_msg = Message(
@@ -234,7 +234,7 @@ async def chat(payload: ChatRequest, db: Session = Depends(get_db)):
 
     try:
         data = await call_openrouter(llm_messages)
-        latency_ms = int((time.perf_counter() - start) * 1000)
+        latency_ms = int((time.perf_counter() - start) * 1000)#ms donusumu
         assistant_text = _safe_extract_assistant_text(data)
         usage = data.get("usage") or {}
         used_model = data.get("model") or (settings.OPENROUTER_MODEL_PRIMARY or "openai/gpt-4o-mini")

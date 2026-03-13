@@ -1,3 +1,4 @@
+import json
 import logging
 
 import httpx
@@ -30,6 +31,10 @@ async def search_weknora(question: str, limit: int = 5) -> list[str]:
     WeKnora hybrid-search endpoint'ini kullanarak
     soruya en alakalı chunk'ları döndürür.
     WeKnora içinde: Ollama embed → Qdrant hybrid search
+
+    NOT: WeKnora hybrid-search GET metodunu kullanır ama
+    body ister. httpx'te json= parametresi GET'te body göndermez,
+    bu yüzden content= ile raw bytes olarak gönderiyoruz.
     """
     if not question.strip():
         return []
@@ -41,6 +46,8 @@ async def search_weknora(question: str, limit: int = 5) -> list[str]:
     payload = {
         "query_text": question.strip(),
         "match_count": limit,
+        "disable_keywords_match": False,
+        "disable_vector_match": False,
     }
 
     try:
@@ -49,7 +56,7 @@ async def search_weknora(question: str, limit: int = 5) -> list[str]:
                 method="GET",
                 url=search_url,
                 headers=_weknora_headers(),
-                json=payload,
+                content=json.dumps(payload).encode("utf-8"),
             )
     except httpx.HTTPError as e:
         logger.warning("WeKnora search request failed: %s", e)
