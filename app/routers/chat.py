@@ -7,9 +7,11 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.security import get_current_user
 from app.db.deps import get_db
 from app.models.conversation import Conversation
 from app.models.message import Message
+from app.models.user import User
 from app.schemas.chat import ChatRequest, ChatResponse, ChatStreamResponse
 from app.services.rag import retrieve_context
 from app.services.mqtt import (
@@ -29,14 +31,14 @@ DEFAULT_SYSTEM_PROMPT = getattr(settings, "DEFAULT_SYSTEM_PROMPT", None) or "You
 MAX_HISTORY_MESSAGES = int(getattr(settings, "MAX_HISTORY_MESSAGES", 6))
 
 
-def build_base_history_messages(history: List[Message]) -> List[Dict[str, str]]:#sqlalchemy nesnelerini openrouterin anlayacagi sekilde dict nesnelerine donusturuyoruz
+def build_base_history_messages(history: List[Message]) -> List[Dict[str, str]]:
     llm_messages: List[Dict[str, str]] = []
     for m in history:
         if m.role in ("user", "assistant") and m.content:
             llm_messages.append({"role": m.role, "content": m.content})
     return llm_messages
 
-#halusinasyonlari vs engellemek icin prompt yazdik llme kim oldugunu soyluyoruz
+
 def build_system_prompt() -> str:
     base = DEFAULT_SYSTEM_PROMPT.strip()
     rag_rules = """
@@ -48,7 +50,7 @@ Cevabı mümkün olduğunca bağlamdaki ifadeye sadık ve net ver.
 """.strip()
     return f"{base}\n\n{rag_rules}"
 
-#openrouterdan gelen cevabin icinden contexti cekiyoruz
+
 def _safe_extract_assistant_text(data: Dict[str, Any]) -> str:
     try:
         choices = data.get("choices")
@@ -63,7 +65,7 @@ def _safe_extract_assistant_text(data: Dict[str, Any]) -> str:
         if isinstance(content, str):
             return content.strip()
         if isinstance(content, list):
-            parts: List[str] = []#vision modellerde icerik string yerine liste olur
+            parts: List[str] = []
             for item in content:
                 if isinstance(item, dict):
                     text = item.get("text")
@@ -73,9 +75,9 @@ def _safe_extract_assistant_text(data: Dict[str, Any]) -> str:
                 return "\n".join(parts)
         return str(content).strip()
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"LLM response parse error: {e}")#biz bir sunucuya yonlendirdik bizden kaynakli hata
+        raise HTTPException(status_code=502, detail=f"LLM response parse error: {e}")
 
-#pyhton exceptionu meta jsonb alanina kaydetmek icin dict formatina donusturuyoruz ne tur hata oldugunu veri tabaninda saklamak icin
+
 def _error_to_meta(e: Exception) -> Dict[str, Any]:
     text = str(e)
     if len(text) > 2000:
@@ -95,9 +97,9 @@ async def call_openrouter(messages: List[Dict[str, str]]) -> Dict[str, Any]:
     payload = {
         "model": settings.OPENROUTER_MODEL_PRIMARY or "openai/gpt-4o-mini",
         "messages": messages,
-        "temperature": 0.2,#llmin yaraticilik seviyesi 0.0 determinsitik 1.0 cok yaratici
+        "temperature": 0.2,
     }
-#with ile blok bitince clientin kapatilip baglantinin serbest kalmasini saglariz
+
     try:
         async with httpx.AsyncClient(timeout=60) as client:
             r = await client.post(url, headers=headers, json=payload)
@@ -111,10 +113,6 @@ async def call_openrouter(messages: List[Dict[str, str]]) -> Dict[str, Any]:
 
 
 async def call_openrouter_stream(messages: List[Dict[str, str]]):
-    """
-    OpenRouter'a streaming request gönderir.
-    Her chunk'ı generator olarak yield eder.
-    """
     if not settings.OPENROUTER_API_KEY:
         raise HTTPException(status_code=500, detail="OPENROUTER_API_KEY is missing in .env")
 
@@ -127,14 +125,14 @@ async def call_openrouter_stream(messages: List[Dict[str, str]]):
         "model": settings.OPENROUTER_MODEL_PRIMARY or "openai/gpt-4o-mini",
         "messages": messages,
         "temperature": 0.2,
-        "stream": True,#cevabi toplu gonderme token geldikce gönder
+        "stream": True,
     }
 
     async with httpx.AsyncClient(timeout=60) as client:
         async with client.stream("POST", url, headers=headers, json=payload) as r:
             r.raise_for_status()
-            async for line in r.aiter_lines():#satir satir oku
-                if not line.startswith("data:"):#openrouterda stream yaniti sse standardinda gelir ve bu format data ile baslar data ile baslamayn satirlarin islevi farklidir biz data ile baslayanlari aliyoruz digerlerin iatliyoruz
+            async for line in r.aiter_lines():
+                if not line.startswith("data:"):
                     continue
                 data_str = line[5:].strip()
                 if data_str == "[DONE]":
@@ -145,7 +143,7 @@ async def call_openrouter_stream(messages: List[Dict[str, str]]):
                     import json
                     chunk = json.loads(data_str)
                     delta = chunk.get("choices", [{}])[0].get("delta", {})
-                    token = delta.get("content")#stremada her chunck tam mesaj degil onceki mesajdan bir fark yani delta icerir
+                    token = delta.get("content")
                     if token:
                         yield token
                 except Exception:
@@ -186,7 +184,11 @@ def _build_llm_messages(
 
 
 @router.post("/", response_model=ChatResponse, status_code=status.HTTP_200_OK)
-async def chat(payload: ChatRequest, db: Session = Depends(get_db)):
+async def chat(
+    payload: ChatRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     conv = db.query(Conversation).filter(Conversation.id == payload.conversation_id).first()
     if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")
@@ -209,7 +211,7 @@ async def chat(payload: ChatRequest, db: Session = Depends(get_db)):
         .all()
     )[::-1]
 
-    context = await retrieve_context(payload.message)#weknoraya istek atip ilgili chuncklari donduruyoruz
+    context = await retrieve_context(payload.message)
     llm_messages = _build_llm_messages(history, payload.message, context)
 
     assistant_msg = Message(
@@ -234,7 +236,7 @@ async def chat(payload: ChatRequest, db: Session = Depends(get_db)):
 
     try:
         data = await call_openrouter(llm_messages)
-        latency_ms = int((time.perf_counter() - start) * 1000)#ms donusumu
+        latency_ms = int((time.perf_counter() - start) * 1000)
         assistant_text = _safe_extract_assistant_text(data)
         usage = data.get("usage") or {}
         used_model = data.get("model") or (settings.OPENROUTER_MODEL_PRIMARY or "openai/gpt-4o-mini")
@@ -276,11 +278,11 @@ async def chat(payload: ChatRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/stream", response_model=ChatStreamResponse, status_code=status.HTTP_200_OK)
-async def chat_stream(payload: ChatRequest, db: Session = Depends(get_db)):
-    """
-    OpenRouter'dan streaming yanıt alır, her token'ı MQTT topic'e publish eder.
-    Client MQTT'ye subscribe olup token'ları gerçek zamanlı alır.
-    """
+async def chat_stream(
+    payload: ChatRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     conv = db.query(Conversation).filter(Conversation.id == payload.conversation_id).first()
     if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")
@@ -324,7 +326,6 @@ async def chat_stream(payload: ChatRequest, db: Session = Depends(get_db)):
     stream_topic = get_stream_topic(payload.conversation_id, assistant_msg.id)
     done_topic = get_done_topic(payload.conversation_id, assistant_msg.id)
 
-    # Streaming başlat, token'ları MQTT'ye publish et
     full_text = ""
     start = time.perf_counter()
 
@@ -336,7 +337,6 @@ async def chat_stream(payload: ChatRequest, db: Session = Depends(get_db)):
 
             latency_ms = int((time.perf_counter() - start) * 1000)
 
-            # Tamamlandı sinyali gönder
             await publish_done(
                 mqtt,
                 payload.conversation_id,
@@ -349,7 +349,6 @@ async def chat_stream(payload: ChatRequest, db: Session = Depends(get_db)):
                 },
             )
 
-        # DB'ye kaydet
         assistant_msg.content = full_text
         assistant_msg.meta = {
             **(assistant_msg.meta or {}),

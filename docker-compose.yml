@@ -1,7 +1,8 @@
 services:
-  # -------------------------
-  # AI Engine Postgres
-  # -------------------------
+
+  # ============================================================
+  # AI ENGINE - PostgreSQL (ai_engine veritabanı)
+  # ============================================================
   postgres:
     container_name: postgres_db
     image: postgres:15
@@ -19,10 +20,12 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - main-network
 
-  # -------------------------
-  # EMQX (MQTT Broker)
-  # -------------------------
+  # ============================================================
+  # EMQX - MQTT Broker
+  # ============================================================
   emqx:
     image: emqx:5.8.4
     container_name: emqx
@@ -46,12 +49,11 @@ services:
       retries: 10
       start_period: 60s
     networks:
-      - default
-      - weknora_WeKnora-network
+      - main-network
 
-  # -------------------------
-  # FastAPI AI Engine
-  # -------------------------
+  # ============================================================
+  # FASTAPI - AI Engine
+  # ============================================================
   ai_engine:
     build: .
     container_name: ai_engine
@@ -73,16 +75,176 @@ services:
       - "8001:8000"
     restart: unless-stopped
     networks:
-      - default
-      - weknora_WeKnora-network
+      - main-network
+
+  # ============================================================
+  # WEKNORA - PostgreSQL (WeKnora veritabanı - ayrı instance)
+  # ============================================================
+  weknora-postgres:
+    image: paradedb/paradedb:v0.21.4-pg17
+    container_name: WeKnora-postgres
+    environment:
+      - POSTGRES_USER=${WEKNORA_DB_USER}
+      - POSTGRES_PASSWORD=${WEKNORA_DB_PASSWORD}
+      - POSTGRES_DB=${WEKNORA_DB_NAME}
+    volumes:
+      - weknora_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${WEKNORA_DB_USER}"]
+      interval: 10s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+    stop_grace_period: 1m
+    networks:
+      - main-network
+
+  # ============================================================
+  # WEKNORA - Redis
+  # ============================================================
+  weknora-redis:
+    image: redis:7.0-alpine
+    container_name: WeKnora-redis
+    command: redis-server --appendonly yes --requirepass ${WEKNORA_REDIS_PASSWORD}
+    restart: always
+    networks:
+      - main-network
+
+  # ============================================================
+  # WEKNORA - Qdrant (Vektör Veritabanı)
+  # ============================================================
+  qdrant:
+    image: qdrant/qdrant:v1.16.2
+    container_name: WeKnora-qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    restart: unless-stopped
+    networks:
+      - main-network
+
+  # ============================================================
+  # WEKNORA - Docreader (Doküman işleme servisi)
+  # ============================================================
+  weknora-docreader:
+    image: wechatopenai/weknora-docreader:latest
+    container_name: WeKnora-docreader
+    ports:
+      - "50051:50051"
+    volumes:
+      - docreader_tmp:/tmp/docreader
+    environment:
+      - DOCREADER_IMAGE_OUTPUT_DIR=/tmp/docreader
+      - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-50}
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-addr=:50051"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - main-network
+
+  # ============================================================
+  # WEKNORA - App (Backend API)
+  # ============================================================
+  weknora-app:
+    image: wechatopenai/weknora-app:latest
+    container_name: WeKnora-app
+    ports:
+      - "8080:8080"
+    volumes:
+      - weknora_files:/data/files
+      - docreader_tmp:/tmp/docreader:ro
+      - ./WeKnora/skills/preloaded:/app/skills/preloaded
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    environment:
+      - GIN_MODE=${WEKNORA_GIN_MODE:-release}
+      - DISABLE_REGISTRATION=${WEKNORA_DISABLE_REGISTRATION:-false}
+      - DB_DRIVER=postgres
+      - DB_HOST=WeKnora-postgres
+      - DB_PORT=5432
+      - DB_USER=${WEKNORA_DB_USER}
+      - DB_PASSWORD=${WEKNORA_DB_PASSWORD}
+      - DB_NAME=${WEKNORA_DB_NAME}
+      - RETRIEVE_DRIVER=qdrant
+      - QDRANT_HOST=WeKnora-qdrant
+      - QDRANT_PORT=6334
+      - QDRANT_COLLECTION=${WEKNORA_QDRANT_COLLECTION:-weknora_embeddings}
+      - QDRANT_USE_TLS=false
+      - DOCREADER_ADDR=WeKnora-docreader:50051
+      - DOCREADER_TRANSPORT=grpc
+      - STORAGE_TYPE=local
+      - LOCAL_STORAGE_BASE_DIR=/data/files
+      - STREAM_MANAGER_TYPE=redis
+      - REDIS_ADDR=WeKnora-redis:6379
+      - REDIS_PASSWORD=${WEKNORA_REDIS_PASSWORD}
+      - REDIS_DB=0
+      - REDIS_PREFIX="stream:"
+      - JWT_SECRET=${WEKNORA_JWT_SECRET}
+      - TENANT_AES_KEY=${WEKNORA_TENANT_AES_KEY}
+      - SYSTEM_AES_KEY=${WEKNORA_SYSTEM_AES_KEY}
+      - AUTO_RECOVER_DIRTY=true
+      - CONCURRENCY_POOL_SIZE=5
+      - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-50}
+      - WEKNORA_SANDBOX_MODE=docker
+      - WEKNORA_SANDBOX_TIMEOUT=60
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+    depends_on:
+      weknora-postgres:
+        condition: service_healthy
+      weknora-redis:
+        condition: service_started
+      weknora-docreader:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - main-network
+
+  # ============================================================
+  # WEKNORA - Frontend (Nginx + UI)
+  # ============================================================
+  weknora-frontend:
+    image: wechatopenai/weknora-ui:latest
+    container_name: WeKnora-frontend
+    ports:
+      - "3080:80"
+    environment:
+      - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-50}
+      - APP_HOST=WeKnora-app
+      - APP_PORT=8080
+      - APP_SCHEME=http
+    depends_on:
+      weknora-app:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - main-network
 
 volumes:
   postgres_data:
   emqx_data:
   emqx_log:
+  weknora_postgres_data:
+  weknora_files:
+  docreader_tmp:
+  qdrant_data:
 
 networks:
-  default:
+  main-network:
     driver: bridge
-  weknora_WeKnora-network:
-    external: true

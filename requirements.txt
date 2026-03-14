@@ -1,0 +1,15 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+psycopg2-binary
+alembic
+python-dotenv
+httpx
+pydantic
+paho-mqtt
+openai
+python-jose[cryptography]
+bcrypt==4.0.1
+passlib[bcrypt]==1.7.4
+python-multipart
+aiomqtt

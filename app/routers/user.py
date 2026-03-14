@@ -1,32 +1,48 @@
-from fastapi import Depends,APIRouter,HTTPException,status
+from fastapi import Depends, APIRouter, HTTPException, status
 from sqlalchemy.orm import Session
-from sqlalchemy.exc import IntegrityError#veri tabani kisitlamalari saglanmazsa hata firlatir.
-
-from app.schemas.user import UserCreate,UserOut
+from sqlalchemy.exc import IntegrityError
+from pydantic import BaseModel
 from app.db.deps import get_db
 from app.models.user import User
+from app.core.security import hash_password
 
-router = APIRouter(prefix="/users",tags=["users"])
+router = APIRouter(prefix="/users", tags=["users"])
 
-@router.post("/",response_model=UserOut,status_code=status.HTTP_201_CREATED)
-def create_user(payload:UserCreate,db:Session = Depends(get_db)):
-    user = User(username = payload.username)
+
+class UserCreate(BaseModel):
+    username: str
+    password: str
+
+
+class UserOut(BaseModel):
+    id: int
+    username: str
+
+    class Config:
+        from_attributes = True
+
+
+@router.post("/", response_model=UserOut, status_code=status.HTTP_201_CREATED)
+def create_user(payload: UserCreate, db: Session = Depends(get_db)):
+    """Yeni kullanıcı oluşturur, şifreyi hashleyerek saklar."""
+    user = User(
+        username=payload.username,
+        hashed_password=hash_password(payload.password),
+    )
     db.add(user)
     try:
-          db.commit()
+        db.commit()
     except IntegrityError:
-         db.rollback()
-         #unique username yakalandı
-         raise HTTPException(
-              status_code=status.HTTP_409_CONFLICT,
-              detail="Username already exists"
-         )
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Username already exists",
+        )
     db.refresh(user)
     return user
-@router.get("/",response_model=list[UserOut])
-def list_users(db:Session = Depends(get_db)):
-     return db.query(User).order_by(User.id.asc()).all()
-    
-  
 
 
+@router.get("/", response_model=list[UserOut])
+def list_users(db: Session = Depends(get_db)):
+    """Tüm kullanıcıları listeler."""
+    return db.query(User).order_by(User.id.asc()).all()

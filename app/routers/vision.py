@@ -6,9 +6,11 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, s
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.security import get_current_user
 from app.db.deps import get_db
 from app.models.conversation import Conversation
 from app.models.message import Message
+from app.models.user import User
 from app.routers.chat import (
     MAX_HISTORY_MESSAGES,
     build_base_history_messages,
@@ -48,19 +50,17 @@ async def vision_chat(
     message: str = Form(...),
     image: UploadFile = File(...),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    # Conversation var mı kontrol et
     conv = db.query(Conversation).filter(Conversation.id == conversation_id).first()
     if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
-    # Görsel formatını doğrula
     mime_type = validate_image(image)
     image_bytes = await image.read()
     if not image_bytes:
         raise HTTPException(status_code=400, detail="Görsel dosyası boş")
 
-    # Kullanıcı mesajını kaydet
     user_msg = Message(
         conversation_id=conversation_id,
         role="user",
@@ -75,7 +75,6 @@ async def vision_chat(
     db.commit()
     db.refresh(user_msg)
 
-    # Konuşma geçmişini al
     history = (
         db.query(Message)
         .filter(Message.conversation_id == conversation_id)
@@ -84,18 +83,14 @@ async def vision_chat(
         .all()
     )[::-1]
 
-    # RAG context al
     context = await retrieve_context(message)
 
-    # History'den son user mesajını çıkar (zaten vision message olarak ekleyeceğiz)
     llm_history = build_base_history_messages(history)
     if llm_history and llm_history[-1]["role"] == "user":
         llm_history = llm_history[:-1]
 
-    # System prompt
     system_prompt = build_system_prompt()
 
-    # Vision mesajlarını oluştur
     llm_messages = build_vision_messages(
         image_bytes=image_bytes,
         mime_type=mime_type,
@@ -105,7 +100,6 @@ async def vision_chat(
         system_prompt=system_prompt,
     )
 
-    # Assistant mesajını önceden kaydet
     assistant_msg = Message(
         conversation_id=conversation_id,
         role="assistant",
