@@ -212,7 +212,7 @@ async def chat(
         .all()
     )[::-1]
 
-    context = await retrieve_context(payload.message)
+    context = await retrieve_context(payload.message, document_ids=payload.document_ids)
     llm_messages = _build_llm_messages(history, payload.message, context)
 
     assistant_msg = Message(
@@ -306,7 +306,7 @@ async def chat_stream(
         .all()
     )[::-1]
 
-    context = await retrieve_context(payload.message)
+    context = await retrieve_context(payload.message, document_ids=payload.document_ids)
     llm_messages = _build_llm_messages(history, payload.message, context)
 
     assistant_msg = Message(

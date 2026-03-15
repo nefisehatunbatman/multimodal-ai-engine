@@ -70,7 +70,11 @@ async def expand_query(question: str) -> str:
         return question  # hata olursa orijinal soruyu kullan
 
 
-async def search_weknora(question: str, limit: int = 5) -> list[str]:
+async def search_weknora(
+    question: str,
+    limit: int = 5,
+    document_ids: list[str] | None = None,
+) -> list[str]:
     """
     WeKnora hybrid-search endpoint'ini kullanarak
     soruya en alakalı chunk'ları döndürür.
@@ -87,12 +91,17 @@ async def search_weknora(question: str, limit: int = 5) -> list[str]:
         return []
 
     search_url = f"{WEKNORA_BASE_URL}/api/v1/knowledge-bases/{WEKNORA_KB_ID}/hybrid-search"
-    payload = {
+    payload: dict = {
         "query_text": question.strip(),
         "match_count": limit,
         "disable_keywords_match": False,
         "disable_vector_match": False,
     }
+
+    # Belge filtresi — sadece seçili belgelerde ara
+    if document_ids:
+        payload["knowledge_ids"] = document_ids
+        logger.info("RAG search filtered to %d document(s)", len(document_ids))
 
     try:
         async with httpx.AsyncClient(timeout=30) as client:
@@ -135,15 +144,19 @@ async def search_weknora(question: str, limit: int = 5) -> list[str]:
     return texts
 
 
-async def retrieve_context(question: str) -> str:
+async def retrieve_context(
+    question: str,
+    document_ids: list[str] | None = None,
+) -> str:
     """
     chat.py tarafından çağrılır. API imzası değişmiyor.
     Soruyu önce genişletir, sonra WeKnora'da arar.
+    document_ids verilirse sadece o belgelerde arar.
     """
     # Soruyu semantik olarak genişlet
     expanded_question = await expand_query(question)
 
-    contexts = await search_weknora(expanded_question, limit=5)
+    contexts = await search_weknora(expanded_question, limit=5, document_ids=document_ids)
 
     if not contexts:
         logger.warning("RAG context tamamen boş! Soru: %s", (question or "")[:80])
