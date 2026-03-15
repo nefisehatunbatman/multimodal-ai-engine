@@ -26,6 +26,50 @@ def _clean_text(text: str) -> str:
     return " ".join(text.split()).strip()
 
 
+async def expand_query(question: str) -> str:
+    """
+    Kullanıcının sorusunu LLM ile semantik olarak genişletir.
+    Örn: "toplam maliyet" → "toplam maliyet, toplam gider, toplam gelir, finansal özet"
+    Bu sayede WeKnora'da daha iyi chunk eşleşmesi sağlanır.
+    """
+    if not settings.OPENROUTER_API_KEY:
+        return question
+
+    url = "https://openrouter.ai/api/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {settings.OPENROUTER_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": settings.OPENROUTER_MODEL_PRIMARY or "openai/gpt-4o-mini",
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "Kullanıcının sorusunu belge araması için genişlet. "
+                    "Soruyla semantik olarak ilgili 3-5 alternatif terim veya ifade üret. "
+                    "Sadece terimleri virgülle ayırarak yaz, başka hiçbir şey yazma."
+                ),
+            },
+            {"role": "user", "content": question},
+        ],
+        "temperature": 0.0,
+        "max_tokens": 100,
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.post(url, headers=headers, json=payload)
+            r.raise_for_status()
+            data = r.json()
+            expanded = data["choices"][0]["message"]["content"].strip()
+            logger.info("Query expanded: '%s' → '%s, %s'", question, question, expanded)
+            return f"{question}, {expanded}"
+    except Exception as e:
+        logger.warning("Query expansion failed, using original question: %s", e)
+        return question  # hata olursa orijinal soruyu kullan
+
+
 async def search_weknora(question: str, limit: int = 5) -> list[str]:
     """
     WeKnora hybrid-search endpoint'ini kullanarak
@@ -94,8 +138,12 @@ async def search_weknora(question: str, limit: int = 5) -> list[str]:
 async def retrieve_context(question: str) -> str:
     """
     chat.py tarafından çağrılır. API imzası değişmiyor.
+    Soruyu önce genişletir, sonra WeKnora'da arar.
     """
-    contexts = await search_weknora(question, limit=5)
+    # Soruyu semantik olarak genişlet
+    expanded_question = await expand_query(question)
+
+    contexts = await search_weknora(expanded_question, limit=5)
 
     if not contexts:
         logger.warning("RAG context tamamen boş! Soru: %s", (question or "")[:80])

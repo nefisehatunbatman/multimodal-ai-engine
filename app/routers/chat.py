@@ -42,11 +42,9 @@ def build_base_history_messages(history: List[Message]) -> List[Dict[str, str]]:
 def build_system_prompt() -> str:
     base = DEFAULT_SYSTEM_PROMPT.strip()
     rag_rules = """
-Sen bir RAG asistanısın.
-Kullanıcı belgeye dayalı bir soru soruyorsa, yalnızca sağlanan bağlamı kullanarak cevap ver.
-Bağlamda olmayan bilgileri tahmin etme, uydurma, dış bilgini ekleme.
-Eğer cevap bağlamda açıkça yoksa şu anlamda cevap ver: "Belgelerde bu bilgi yok."
-Cevabı mümkün olduğunca bağlamdaki ifadeye sadık ve net ver.
+Sen yardımcı bir asistansın. Sana belge bağlamı sağlandığında önce onu kullan.
+Belgede bilgi yoksa veya yetersizse kendi bilginle cevap ver.
+Kullanıcıya her zaman faydalı ve dolu bir cevap sun.
 """.strip()
     return f"{base}\n\n{rag_rules}"
 
@@ -163,16 +161,19 @@ def _build_llm_messages(
 
     if context:
         augmented_user_message = (
-            "Aşağıda soru ile ilgili belge bağlamı verilmiştir.\n"
-            "Yalnızca bu bağlamı kullanarak cevap ver.\n"
-            "Bağlamda yoksa: 'Belgelerde bu bilgi yok.' de.\n\n"
+            "Aşağıda belge bağlamı verilmiştir.\n"
+            "Kullanıcının sorusuna birebir cevap olmasa bile, bağlamdaki ilgili tüm bilgileri kullanıcıya sun.\n"
+            "Örneğin kullanıcı 'toplam maliyet' soruyorsa ama bağlamda 'toplam gelir' varsa, "
+            "onu da göster ve 'belgede maliyet yok ama toplam gelir şu' şeklinde cevap ver.\n"
+            "Bağlamdaki finansal, sayısal veya ilgili tüm verileri mutlaka paylaş.\n"
+            "Bağlamda hiç ilgili bilgi yoksa kendi genel bilginle cevap ver.\n\n"
             f"[Bağlam]\n{context}\n\n"
             f"[Soru]\n{message}"
         )
     else:
         augmented_user_message = (
             "Belge bağlamı bulunamadı.\n"
-            "Eğer cevap belgeye bağlıysa ve bağlam yoksa 'Belgelerde bu bilgi yok.' diye belirt.\n\n"
+            "Kendi bilginle normal bir asistan gibi cevap ver.\n\n"
             f"[Soru]\n{message}"
         )
 

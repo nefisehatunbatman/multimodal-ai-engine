@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 class ChatRequest(BaseModel):
     conversation_id: int = Field(gt=0)
     message: str = Field(min_length=1)
-    meta: Optional[Dict[str, Any]] = None
+    meta: Dict[str, Any] = Field(default_factory=dict)
 
 
 class ChatResponse(BaseModel):

@@ -14,7 +14,7 @@ class MessageCreate(BaseModel):
     conversation_id: int = Field(gt=0)
     role: MessageRole
     content: str = Field(min_length=1)
-    meta: Optional[Dict[str, Any]] = None
+    meta: Dict[str, Any] = Field(default_factory=dict)
 
 
 class MessageOut(BaseModel):
@@ -22,7 +22,7 @@ class MessageOut(BaseModel):
     conversation_id: int
     role: MessageRole
     content: str
-    meta: Optional[Dict[str, Any]] = None
+    meta: Dict[str, Any] = Field(default_factory=dict)
 
     class Config:
         from_attributes = True
