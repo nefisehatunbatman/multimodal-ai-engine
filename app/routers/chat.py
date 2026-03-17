@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import time
@@ -10,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.security import get_current_user
 from app.db.deps import get_db
+from app.db.postgres import SessionLocal
 from app.models.conversation import Conversation
 from app.models.message import Message
 from app.models.user import User
@@ -57,14 +59,18 @@ def _safe_extract_assistant_text(data: Dict[str, Any]) -> str:
         choices = data.get("choices")
         if not choices:
             raise KeyError("choices is missing/empty")
+
         msg = choices[0].get("message")
         if not msg:
             raise KeyError("choices[0].message is missing")
+
         content = msg.get("content")
         if content is None:
             raise KeyError("choices[0].message.content is missing")
+
         if isinstance(content, str):
             return content.strip()
+
         if isinstance(content, list):
             parts: List[str] = []
             for item in content:
@@ -74,7 +80,9 @@ def _safe_extract_assistant_text(data: Dict[str, Any]) -> str:
                         parts.append(text.strip())
             if parts:
                 return "\n".join(parts)
+
         return str(content).strip()
+
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"LLM response parse error: {e}")
 
@@ -83,7 +91,10 @@ def _error_to_meta(e: Exception) -> Dict[str, Any]:
     text = str(e)
     if len(text) > 2000:
         text = text[:2000] + "...(truncated)"
-    return {"error_type": e.__class__.__name__, "error_message": text}
+    return {
+        "error_type": e.__class__.__name__,
+        "error_message": text,
+    }
 
 
 def _get_conversation_or_403(
@@ -102,8 +113,10 @@ def _get_conversation_or_403(
 async def _maybe_generate_title(conv: Conversation, message: str, db: Session) -> None:
     if conv.title and conv.title != "Yeni Sohbet":
         return
+
     if not settings.OPENROUTER_API_KEY:
         return
+
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             r = await client.post(
@@ -135,6 +148,7 @@ async def _maybe_generate_title(conv: Conversation, message: str, db: Session) -
                 db.add(conv)
                 db.commit()
                 logger.info("Auto-title generated for conversation %d: %s", conv.id, title)
+
     except Exception as e:
         logger.warning("Auto-title generation failed: %s", e)
 
@@ -169,14 +183,19 @@ async def call_openrouter_stream(
             },
         ) as r:
             r.raise_for_status()
+
             async for line in r.aiter_lines():
                 if not line.startswith("data:"):
                     continue
+
                 data_str = line[5:].strip()
+
                 if data_str == "[DONE]":
                     break
+
                 if not data_str:
                     continue
+
                 try:
                     chunk = json.loads(data_str)
                     token = chunk.get("choices", [{}])[0].get("delta", {}).get("content")
@@ -192,6 +211,7 @@ def _build_text_messages(
     context: str,
 ) -> List[Dict[str, Any]]:
     llm_history = build_base_history_messages(history)
+
     if llm_history and llm_history[-1]["role"] == "user":
         llm_history = llm_history[:-1]
 
@@ -224,16 +244,19 @@ async def _build_llm_messages(
     image: Optional[UploadFile],
 ) -> tuple[List[Dict[str, Any]], bool]:
     llm_history = build_base_history_messages(history)
+
     if llm_history and llm_history[-1]["role"] == "user":
         llm_history = llm_history[:-1]
 
     if image is not None:
         mime = image.content_type or ""
+
         if mime not in ALLOWED_IMAGE_TYPES:
             raise HTTPException(
                 status_code=400,
                 detail=f"Desteklenen görsel formatları: {', '.join(ALLOWED_IMAGE_TYPES)}. Gelen: {mime}",
             )
+
         image_bytes = await image.read()
         if not image_bytes:
             raise HTTPException(status_code=400, detail="Görsel dosyası boş")
@@ -248,6 +271,131 @@ async def _build_llm_messages(
         ), True
 
     return _build_text_messages(history, message, context), False
+
+
+async def run_chat_streaming_task(
+    conversation_id: int,
+    assistant_message_id: int,
+    llm_messages: List[Dict[str, Any]],
+    used_model: str,
+    context: str,
+    is_vision: bool,
+    selected_model: Optional[str],
+    temperature: Optional[float],
+):
+    db: Session = SessionLocal()
+
+    try:
+        assistant_msg = (
+            db.query(Message)
+            .filter(Message.id == assistant_message_id)
+            .first()
+        )
+
+        if not assistant_msg:
+            logger.warning("Assistant message not found: %s", assistant_message_id)
+            return
+
+        full_text = ""
+        start = time.perf_counter()
+
+        if is_vision:
+            data = await call_openrouter_vision(
+                llm_messages,
+                model=selected_model,
+                temperature=temperature,
+            )
+            full_text = _safe_extract_assistant_text(data)
+            latency_ms = int((time.perf_counter() - start) * 1000)
+
+            async with get_mqtt_client() as mqtt:
+                await publish_done(
+                    mqtt,
+                    conversation_id,
+                    assistant_message_id,
+                    full_text,
+                    {
+                        "model": used_model,
+                        "latency_ms": latency_ms,
+                        "rag_context_used": bool(context),
+                    },
+                )
+
+        else:
+            async with get_mqtt_client() as mqtt:
+                async for token in call_openrouter_stream(
+                    llm_messages,
+                    model=selected_model,
+                    temperature=temperature,
+                ):
+                    full_text += token
+                    await publish_token(
+                        mqtt,
+                        conversation_id,
+                        assistant_message_id,
+                        token,
+                    )
+
+                latency_ms = int((time.perf_counter() - start) * 1000)
+
+                await publish_done(
+                    mqtt,
+                    conversation_id,
+                    assistant_message_id,
+                    full_text,
+                    {
+                        "model": used_model,
+                        "latency_ms": latency_ms,
+                        "rag_context_used": bool(context),
+                    },
+                )
+
+        assistant_msg.content = full_text
+        assistant_msg.meta = {
+            **(assistant_msg.meta or {}),
+            "status": "completed",
+            "model": used_model,
+            "latency_ms": latency_ms,
+        }
+        db.add(assistant_msg)
+        db.commit()
+        db.refresh(assistant_msg)
+
+    except Exception as e:
+        logger.exception(
+            "Background chat streaming error for conversation_id=%d, assistant_message_id=%d: %s",
+            conversation_id,
+            assistant_message_id,
+            e,
+        )
+
+        try:
+            async with get_mqtt_client() as mqtt:
+                await publish_error(
+                    mqtt,
+                    conversation_id,
+                    assistant_message_id,
+                    str(e),
+                )
+        except Exception as mqtt_err:
+            logger.warning("MQTT error publish failed: %s", mqtt_err)
+
+        assistant_msg = (
+            db.query(Message)
+            .filter(Message.id == assistant_message_id)
+            .first()
+        )
+        if assistant_msg:
+            assistant_msg.meta = {
+                **(assistant_msg.meta or {}),
+                "status": "failed",
+                **_error_to_meta(e),
+            }
+            db.add(assistant_msg)
+            db.commit()
+
+    finally:
+        db.close()
 
 
 @router.post("/", response_model=ChatStreamResponse, status_code=status.HTTP_200_OK)
@@ -270,7 +418,14 @@ async def chat(
         content=message,
         meta={
             "has_image": image is not None,
-            **({"image_filename": image.filename, "image_mime_type": image.content_type} if image else {}),
+            **(
+                {
+                    "image_filename": image.filename,
+                    "image_mime_type": image.content_type,
+                }
+                if image
+                else {}
+            ),
         },
     )
     db.add(user_msg)
@@ -311,69 +466,23 @@ async def chat(
     stream_topic = get_stream_topic(conversation_id, assistant_msg.id)
     done_topic = get_done_topic(conversation_id, assistant_msg.id)
 
-    full_text = ""
-    latency_ms = 0  # FIX 1: NameError riskini önlemek için baştan tanımla
-    start = time.perf_counter()
-
-    try:
-        if is_vision:
-            data = await call_openrouter_vision(llm_messages, model=model, temperature=temperature)
-            full_text = _safe_extract_assistant_text(data)
-            latency_ms = int((time.perf_counter() - start) * 1000)
-            # FIX 2: `await get_mqtt_client()` → `get_mqtt_client()` (@asynccontextmanager)
-            async with get_mqtt_client() as mqtt:
-                await publish_done(
-                    mqtt, conversation_id, assistant_msg.id, full_text,
-                    {"model": used_model, "latency_ms": latency_ms, "rag_context_used": bool(context)},
-                )
-        else:
-            # FIX 2: `await get_mqtt_client()` → `get_mqtt_client()` (@asynccontextmanager)
-            async with get_mqtt_client() as mqtt:
-                async for token in call_openrouter_stream(llm_messages, model=model, temperature=temperature):
-                    full_text += token
-                    await publish_token(mqtt, conversation_id, assistant_msg.id, token)
-                latency_ms = int((time.perf_counter() - start) * 1000)
-                await publish_done(
-                    mqtt, conversation_id, assistant_msg.id, full_text,
-                    {"model": used_model, "latency_ms": latency_ms, "rag_context_used": bool(context)},
-                )
-
-        assistant_msg.content = full_text
-        assistant_msg.meta = {
-            **(assistant_msg.meta or {}),
-            "status": "completed",
-            "model": used_model,
-            "latency_ms": latency_ms,
-        }
-        db.add(assistant_msg)
-        db.commit()
-        db.refresh(assistant_msg)
-
-        return ChatStreamResponse(
+    asyncio.create_task(
+        run_chat_streaming_task(
             conversation_id=conversation_id,
-            user_message_id=user_msg.id,
             assistant_message_id=assistant_msg.id,
-            stream_topic=stream_topic,
-            done_topic=done_topic,
+            llm_messages=llm_messages,
+            used_model=used_model,
+            context=context,
+            is_vision=is_vision,
+            selected_model=model,
+            temperature=temperature,
         )
+    )
 
-    except Exception as e:
-        latency_ms = int((time.perf_counter() - start) * 1000)
-        # FIX 3: Gerçek hata artık loglanıyor
-        logger.exception("Chat error for conversation_id=%d: %s", conversation_id, e)
-        try:
-            # FIX 2: burada da aynı düzeltme
-            async with get_mqtt_client() as mqtt:
-                await publish_error(mqtt, conversation_id, assistant_msg.id, str(e))
-        except Exception as mqtt_err:
-            logger.warning("MQTT error publish failed: %s", mqtt_err)
-        assistant_msg.meta = {
-            **(assistant_msg.meta or {}),
-            "status": "failed",
-            "latency_ms": latency_ms,
-            **_error_to_meta(e),
-        }
-        db.add(assistant_msg)
-        db.commit()
-        # FIX 3: Gerçek hata mesajı client'a da dönüyor
-        raise HTTPException(status_code=500, detail=f"Chat error: {type(e).__name__}: {e}")
+    return ChatStreamResponse(
+        conversation_id=conversation_id,
+        user_message_id=user_msg.id,
+        assistant_message_id=assistant_msg.id,
+        stream_topic=stream_topic,
+        done_topic=done_topic,
+    )
