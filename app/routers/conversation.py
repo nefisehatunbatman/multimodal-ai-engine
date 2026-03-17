@@ -15,28 +15,64 @@ def create_conversation(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    user = db.query(User).filter(User.id == payload.user_id).first()
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found",
-        )
-    conversation = Conversation(user_id=payload.user_id)
+    # user_id artık payload'dan değil, token'dan alınıyor — güvenlik açığı kapatıldı
+    conversation = Conversation(
+        user_id=current_user.id,
+        title=payload.title or "Yeni Sohbet",
+    )
     db.add(conversation)
     db.commit()
     db.refresh(conversation)
     return conversation
 
 
-@router.get("/", response_model=list[ConversationOut])
-def list_conversations(
-    user_id: int,
+@router.patch("/{conversation_id}/title", response_model=ConversationOut)
+def update_conversation_title(
+    conversation_id: int,
+    title: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    """Sohbet başlığını günceller. Sadece sahibi güncelleyebilir."""
+    conv = db.query(Conversation).filter(
+        Conversation.id == conversation_id,
+        Conversation.user_id == current_user.id,
+    ).first()
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    conv.title = title
+    db.add(conv)
+    db.commit()
+    db.refresh(conv)
+    return conv
+
+
+@router.delete("/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_conversation(
+    conversation_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Sohbeti siler. Sadece sahibi silebilir."""
+    conv = db.query(Conversation).filter(
+        Conversation.id == conversation_id,
+        Conversation.user_id == current_user.id,
+    ).first()
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    db.delete(conv)
+    db.commit()
+
+
+@router.get("/", response_model=list[ConversationOut])
+def list_conversations(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    # Sadece kendi sohbetlerini döndür — user_id query param kaldırıldı
     return (
         db.query(Conversation)
-        .filter(Conversation.user_id == user_id)
-        .order_by(Conversation.id.asc())
+        .filter(Conversation.user_id == current_user.id)
+        .order_by(Conversation.id.desc())
         .all()
     )
