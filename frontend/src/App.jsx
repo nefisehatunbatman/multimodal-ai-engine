@@ -115,15 +115,18 @@ export default function App() {
       setConversations(safeConversations);
       setDocuments(safeDocuments);
       setModelData(modelResult || null);
+      // YENİ
 
       const firstModel =
-        modelResult?.default_model ||
-        modelResult?.models?.[0]?.id ||
-        modelResult?.categories?.[0]?.models?.[0]?.id ||
-        "";
+          modelResult?.categories
+          ?.flatMap((g) => g.models ?? [])
+          ?.find((m) => m.id === "openai/gpt-4o-mini")?.id
+          ?? modelResult?.categories?.[0]?.models?.[0]?.id
+          ?? "";
 
-      setSelectedModel(firstModel);
+        setSelectedModel(firstModel);
 
+  
       if (safeConversations.length > 0) {
         const firstConversationId = safeConversations[0].id;
         setActiveConversationId(firstConversationId);
@@ -389,7 +392,7 @@ export default function App() {
       <div className="auth-page">
         <form className="auth-card" onSubmit={handleAuthSubmit}>
           <h1>AI Engine</h1>
-          <p>Basit ve temiz frontend</p>
+          <p>Hoşgeldiniz!</p>
 
           <input
             type="text"
@@ -586,7 +589,7 @@ export default function App() {
           />
 
           <div className="composer-footer">
-            <button type="submit" disabled={sending || !prompt.trim()}>
+            <button type="submit" className="send-button" disabled={sending || !prompt.trim()} >
               {sending ? "Gönderiliyor..." : "Gönder"}
             </button>
           </div>

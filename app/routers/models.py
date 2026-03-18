@@ -89,14 +89,14 @@ MODEL_CATALOG = [
                 "description": "OpenAI'nin güçlü multimodal modeli.",
             },
             {
-                "id": "anthropic/claude-sonnet-4-5",
+                "id": "anthropic/claude-sonnet-4.5",
                 "name": "Claude Sonnet 4.5",
                 "provider": "Anthropic",
                 "context_length": 200000,
                 "description": "Kod ve analiz görevlerinde üstün performans.",
             },
             {
-                "id": "anthropic/claude-sonnet-4-6",
+                "id": "anthropic/claude-sonnet-4.6",
                 "name": "Claude Sonnet 4.6",
                 "provider": "Anthropic",
                 "context_length": 200000,

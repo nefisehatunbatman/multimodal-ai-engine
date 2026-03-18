@@ -1,267 +1,202 @@
-* {
-  box-sizing: border-box;
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,300&family=DM+Mono:wght@400;500&display=swap');
+
+/* ─── Tasarım Sistemi ─────────────────────────────────────── */
+:root {
+  --bg:           #f4f3f0;
+  --surface:      #fafaf8;
+  --surface-alt:  #f0efe9;
+  --border:       #e4e2db;
+  --border-light: #eeede8;
+
+  --text-primary:   #1a1917;
+  --text-secondary: #6b6860;
+  --text-muted:     #a8a59f;
+
+  --accent:        #2d6a4f;
+  --accent-light:  #d8f0e5;
+  --accent-hover:  #245a42;
+
+  --user-bubble:   #1a1917;
+  --user-text:     #f4f3f0;
+
+  --danger:        #c0392b;
+  --danger-bg:     #fdf0ee;
+
+  --radius-sm:  8px;
+  --radius-md:  12px;
+  --radius-lg:  18px;
+  --radius-xl:  24px;
+
+  --shadow-sm: 0 1px 3px rgba(26,25,23,0.06), 0 1px 2px rgba(26,25,23,0.04);
+  --shadow-md: 0 4px 12px rgba(26,25,23,0.08), 0 2px 4px rgba(26,25,23,0.04);
+  --shadow-lg: 0 12px 32px rgba(26,25,23,0.10), 0 4px 8px rgba(26,25,23,0.05);
+
+  --font-body: 'DM Sans', sans-serif;
+  --font-mono: 'DM Mono', monospace;
+
+  --sidebar-w: 300px;
+  --transition: 180ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-html,
-body,
-#root {
-  margin: 0;
+/* ─── Reset ───────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body, #root {
   width: 100%;
   height: 100%;
 }
 
 body {
-  font-family: Arial, sans-serif;
-  background: #f5f7fb;
-  color: #1f2937;
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.6;
+  background: var(--bg);
+  color: var(--text-primary);
   overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  letter-spacing: -0.01em;
 }
 
-button,
-input,
-textarea,
-select {
+button, input, textarea, select {
   font: inherit;
   outline: none;
+  letter-spacing: inherit;
 }
 
+/* ─── Auth Sayfası ────────────────────────────────────────── */
 .auth-page {
   min-height: 100vh;
   display: grid;
   place-items: center;
   padding: 24px;
+  position: relative;
+  background-color: var(--bg);
+  background-image: url('/jungle.jpg');
+  background-size: cover;
+  background-position: center;
+  isolation: isolate;
+}
+
+/* Görselin üzerine soft beyaz sis katmanı — kart okunabilirliği için */
+.auth-page::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgba(244, 243, 240, 0.55);
+  backdrop-filter: blur(2px);
+  z-index: -1;
 }
 
 .auth-card {
   width: 100%;
-  max-width: 400px;
-  background: white;
-  border-radius: 16px;
-  padding: 24px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+  max-width: 380px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  padding: 32px;
+  box-shadow: var(--shadow-lg);
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
 }
 
+.auth-card h2 {
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+  letter-spacing: -0.03em;
+}
+
+.auth-card input {
+  width: 100%;
+  padding: 11px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--text-primary);
+  transition: border-color var(--transition), box-shadow var(--transition);
+  font-size: 14px;
+}
+
+.auth-card input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(45,106,79,0.1);
+}
+
+.auth-card input::placeholder {
+  color: var(--text-muted);
+}
+
+/* ─── Ana Layout ──────────────────────────────────────────── */
 .layout {
   display: grid;
-  grid-template-columns: 320px 1fr;
+  grid-template-columns: var(--sidebar-w) 1fr;
   height: 100vh;
   overflow: hidden;
 }
 
+/* ─── Sidebar ─────────────────────────────────────────────── */
 .sidebar {
-  background: white;
-  border-right: 1px solid #e5e7eb;
-  padding: 16px;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
   overflow-y: auto;
   height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebar-inner {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
 }
 
 .sidebar-section {
-  margin-bottom: 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.chat-panel {
-  display: grid;
-  grid-template-rows: auto 1fr auto;
-  height: 100vh;
-  overflow: hidden;
-  background: #f8fafc;
-}
-
-.chat-header {
-  padding: 16px 20px;
-  border-bottom: 1px solid #e5e7eb;
-  background: white;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.message-list {
-  padding: 20px;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  min-height: 0;
-}
-
-.message {
-  max-width: 820px;
-  padding: 14px;
-  border-radius: 14px;
-  background: white;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.05);
-}
-
-.message.user {
-  align-self: flex-end;
-  background: #dbeafe;
-}
-
-.message.assistant {
-  align-self: flex-start;
-}
-
-.message-role {
-  font-size: 12px;
-  font-weight: 700;
-  margin-bottom: 8px;
-  opacity: 0.7;
-}
-
-.message-content {
-  white-space: pre-wrap;
-  line-height: 1.6;
-  word-break: break-word;
-}
-
-.composer {
-  padding: 16px 20px;
-  background: white;
-  border-top: 1px solid #e5e7eb;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.composer textarea,
-.auth-card input,
-select {
-  width: 100%;
-  padding: 12px;
-  border: 1px solid #d1d5db;
-  border-radius: 10px;
-  background: white;
-}
-
-.composer textarea {
-  resize: vertical;
-  min-height: 100px;
-}
-
-.composer-footer {
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  gap: 12px;
-}
-
-button {
-  border: none;
-  background: #111827;
-  color: white;
-  padding: 10px 14px;
-  border-radius: 10px;
-  cursor: pointer;
-  transition: 0.2s ease;
-}
-
-button:hover:not(:disabled) {
-  opacity: 0.92;
-}
-
-button:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.ghost-button {
-  background: #e5e7eb;
-  color: #111827;
-}
-
-.error-box {
-  background: #fee2e2;
-  color: #991b1b;
-  padding: 10px 12px;
-  border-radius: 10px;
-}
-
-.hint-box {
-  background: #f3f4f6;
-  padding: 10px 12px;
-  border-radius: 10px;
-  font-size: 14px;
-}
-
-.conversation-list,
-.document-list {
+  margin-bottom: 24px;
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
-.document-list {
-  max-height: 280px;
-  overflow-y: auto;
-  padding-right: 4px;
+.sidebar h3 {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin: 0 0 8px 2px;
 }
 
-.conversation-item {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 8px;
-}
-
-.conversation-item button:first-child {
-  text-align: left;
-}
-
-.conversation-item.active button:first-child {
-  background: #2563eb;
-}
-
-.delete-button {
-  background: #ef4444;
-}
-
-.checkbox-item {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  font-size: 14px;
-  background: #f8fafc;
-  border: 1px solid #edf2f7;
-  border-radius: 10px;
-  padding: 10px 12px;
-}
-
-.chat-error {
-  margin: 0 20px 12px;
-}
-
+/* ─── Hesap Kartı ─────────────────────────────────────────── */
 .account-section {
-  padding-bottom: 8px;
+  padding: 16px 16px 12px;
+  border-bottom: 1px solid var(--border-light);
 }
 
 .account-card {
   display: flex;
   align-items: center;
-  gap: 12px;
-  background: #f8fafc;
-  border: 1px solid #e5e7eb;
-  border-radius: 14px;
-  padding: 12px;
+  gap: 10px;
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 10px 12px;
 }
 
 .account-avatar {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
   display: grid;
   place-items: center;
-  font-weight: 700;
-  font-size: 16px;
-  background: #6d5efc;
+  font-weight: 600;
+  font-size: 14px;
+  background: var(--accent);
   color: white;
   flex-shrink: 0;
+  letter-spacing: 0;
 }
 
 .account-info {
@@ -270,37 +205,90 @@ button:disabled {
 }
 
 .account-label {
-  font-size: 12px;
-  opacity: 0.7;
-  margin-bottom: 2px;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 1px;
 }
 
 .account-name {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   word-break: break-word;
+  color: var(--text-primary);
 }
 
-.logout-button {
+/* ─── Sohbet Listesi ──────────────────────────────────────── */
+.conversation-list,
+.document-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.document-list {
+  max-height: 260px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.conversation-item {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px;
+  align-items: center;
+}
+
+.conversation-item button:first-child {
+  text-align: left;
+  background: transparent;
+  color: var(--text-secondary);
+  padding: 9px 12px;
+  border-radius: var(--radius-md);
+  font-size: 13.5px;
+  font-weight: 400;
+  border: 1px solid transparent;
+  transition: background var(--transition), color var(--transition), border-color var(--transition);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.document-upload-box {
-  position: relative;
-  margin-bottom: 12px;
+.conversation-item button:first-child:hover {
+  background: var(--surface-alt);
+  color: var(--text-primary);
+  border-color: var(--border-light);
 }
 
-.document-upload-box input[type="file"] {
-  width: 100%;
-  padding: 10px;
-  border: 1px dashed #cbd5e1;
-  border-radius: 12px;
-  background: #f8fafc;
+.conversation-item.active button:first-child {
+  background: var(--accent-light);
+  color: var(--accent);
+  font-weight: 500;
+  border-color: rgba(45,106,79,0.15);
+}
+
+/* ─── Belgeler ────────────────────────────────────────────── */
+.checkbox-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  font-size: 13px;
+  background: var(--surface);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  padding: 9px 11px;
+  transition: border-color var(--transition), background var(--transition);
   cursor: pointer;
 }
 
-.document-upload-box input[type="file"]:hover {
-  background: #f1f5f9;
+.checkbox-item:hover {
+  border-color: var(--border);
+  background: var(--surface-alt);
+}
+
+.checkbox-item input[type="checkbox"] {
+  margin-top: 2px;
+  accent-color: var(--accent);
+  flex-shrink: 0;
 }
 
 .document-list .checkbox-item span {
@@ -308,23 +296,313 @@ button:disabled {
   max-width: 100%;
   overflow-wrap: anywhere;
   line-height: 1.4;
+  color: var(--text-secondary);
 }
 
-.sidebar h3 {
-  margin: 0;
-  font-size: 18px;
+.document-upload-box {
+  margin-bottom: 4px;
 }
 
+.document-upload-box input[type="file"] {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-alt);
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-secondary);
+  transition: border-color var(--transition), background var(--transition);
+}
+
+.document-upload-box input[type="file"]:hover {
+  border-color: var(--accent);
+  background: var(--accent-light);
+}
+
+/* ─── Butonlar ────────────────────────────────────────────── */
+button {
+  border: none;
+  background: var(--text-primary);
+  color: var(--surface);
+  padding: 9px 16px;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font-size: 13.5px;
+  font-weight: 500;
+  transition: background var(--transition), transform var(--transition), box-shadow var(--transition);
+}
+
+button:hover:not(:disabled) {
+  background: #2e2c2a;
+  box-shadow: var(--shadow-sm);
+}
+
+button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.ghost-button {
+  background: var(--surface-alt);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+}
+
+.ghost-button:hover:not(:disabled) {
+  background: var(--border);
+  color: var(--text-primary);
+  box-shadow: none;
+}
+
+.delete-button {
+  background: transparent;
+  color: var(--text-muted);
+  padding: 7px 9px;
+  font-size: 13px;
+  border: 1px solid transparent;
+}
+
+.delete-button:hover:not(:disabled) {
+  background: var(--danger-bg);
+  color: var(--danger);
+  border-color: rgba(192,57,43,0.15);
+  box-shadow: none;
+}
+
+.logout-button {
+  white-space: nowrap;
+  background: transparent;
+  color: var(--text-muted);
+  padding: 6px 10px;
+  font-size: 12px;
+  border: 1px solid var(--border);
+}
+
+.logout-button:hover:not(:disabled) {
+  background: var(--danger-bg);
+  color: var(--danger);
+  border-color: rgba(192,57,43,0.2);
+  box-shadow: none;
+}
+
+/* ─── Chat Panel ──────────────────────────────────────────── */
+.chat-panel {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  height: 100vh;
+  overflow: hidden;
+  position: relative;
+  background-color: var(--bg);
+  background-image: url('/jungle.jpg');
+  background-size: cover;
+  background-position: center;
+  isolation: isolate;
+}
+
+/* Chat alanında daha yoğun sis — mesajlar net okunmalı */
+.chat-panel::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgba(244, 243, 240, 0.72);
+  backdrop-filter: blur(1px);
+  z-index: 0;
+}
+
+/* Panel içindeki her şey overlay'in üstünde olmalı */
+.chat-panel > * {
+  position: relative;
+  z-index: 1;
+}
+
+.chat-header {
+  padding: 14px 24px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.chat-header-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ─── Mesaj Listesi ───────────────────────────────────────── */
+.message-list {
+  padding: 28px 28px 16px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+}
+
+.message {
+  max-width: 720px;
+  padding: 14px 18px;
+  border-radius: var(--radius-lg);
+  line-height: 1.65;
+  animation: msgIn 200ms cubic-bezier(0.34, 1.2, 0.64, 1) both;
+}
+
+@keyframes msgIn {
+  from { opacity: 0; transform: translateY(6px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.message.user {
+  align-self: flex-end;
+  background: var(--user-bubble);
+  color: var(--user-text);
+  border-bottom-right-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+}
+
+.message.assistant {
+  align-self: flex-start;
+  background: var(--surface);
+  color: var(--text-primary);
+  border: 1px solid var(--border-light);
+  border-bottom-left-radius: var(--radius-sm);
+  box-shadow: var(--shadow-sm);
+}
+
+.message-role {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+  opacity: 0.5;
+}
+
+.message.user .message-role { color: var(--user-text); }
+.message.assistant .message-role { color: var(--text-muted); }
+
+.message-content {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 14.5px;
+}
+
+/* ─── Composer ────────────────────────────────────────────── */
+.composer {
+  padding: 16px 24px 20px;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.composer textarea {
+  width: 100%;
+  padding: 13px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg);
+  color: var(--text-primary);
+  resize: none;
+  min-height: 80px;
+  max-height: 200px;
+  font-size: 14.5px;
+  line-height: 1.6;
+  transition: border-color var(--transition), box-shadow var(--transition), background var(--transition);
+}
+
+.composer textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(45,106,79,0.1);
+  background: var(--surface);
+}
+
+.composer textarea::placeholder {
+  color: var(--text-muted);
+}
+
+.composer-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+select {
+  padding: 8px 28px 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-alt);
+  color: var(--text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color var(--transition);
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L5 5L9 1' stroke='%23a8a59f' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+}
+
+select:focus {
+  border-color: var(--accent);
+}
+
+.send-button {
+  background: var(--accent);
+  color: white;
+  padding: 10px 20px;
+  font-weight: 500;
+}
+
+.send-button:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+/* ─── Geri Bildirim Kutuları ──────────────────────────────── */
+.error-box {
+  background: var(--danger-bg);
+  color: var(--danger);
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  font-size: 13.5px;
+  border: 1px solid rgba(192,57,43,0.12);
+}
+
+.hint-box {
+  background: var(--surface-alt);
+  color: var(--text-secondary);
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  font-size: 13.5px;
+  border: 1px solid var(--border-light);
+}
+
+.chat-error {
+  margin: 0 24px 12px;
+}
+
+/* ─── Scrollbar ───────────────────────────────────────────── */
 .sidebar::-webkit-scrollbar,
 .message-list::-webkit-scrollbar,
 .document-list::-webkit-scrollbar {
-  width: 8px;
+  width: 5px;
 }
 
 .sidebar::-webkit-scrollbar-thumb,
 .message-list::-webkit-scrollbar-thumb,
 .document-list::-webkit-scrollbar-thumb {
-  background: #d1d5db;
+  background: var(--border);
   border-radius: 999px;
 }
 
@@ -334,16 +612,10 @@ button:disabled {
   background: transparent;
 }
 
+/* ─── Responsive ──────────────────────────────────────────── */
 @media (max-width: 900px) {
-  html,
-  body,
-  #root {
-    height: auto;
-  }
-
-  body {
-    overflow: auto;
-  }
+  html, body, #root { height: auto; }
+  body { overflow: auto; }
 
   .layout {
     grid-template-columns: 1fr;
@@ -353,8 +625,7 @@ button:disabled {
 
   .sidebar {
     border-right: none;
-    border-bottom: 1px solid #e5e7eb;
-    max-height: none;
+    border-bottom: 1px solid var(--border);
     height: auto;
     overflow: visible;
   }
@@ -366,5 +637,10 @@ button:disabled {
 
   .message-list {
     max-height: 50vh;
+    padding: 16px;
+  }
+
+  .composer {
+    padding: 12px 16px 16px;
   }
 }
