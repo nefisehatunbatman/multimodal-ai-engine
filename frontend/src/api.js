@@ -127,6 +127,59 @@ export async function listDocuments(token, page = 1, pageSize = 100) {
   return data;
 }
 
+export async function uploadDocument(token, file) {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const response = await fetch(`${API_BASE_URL}/documents/ingest`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    body: formData,
+  });
+
+  const data = await safeJson(response);
+
+  if (!response.ok) {
+    throw new Error(data.detail || "Belge yüklenemedi");
+  }
+
+  return data;
+}
+
+export async function uploadImageDocument(token, file) {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const response = await fetch(`${API_BASE_URL}/documents/ingest-image`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    body: formData,
+  });
+
+  const data = await safeJson(response);
+
+  if (!response.ok) {
+    throw new Error(data.detail || "Görsel yüklenemedi");
+  }
+
+  return data;
+}
+
+export async function uploadAnyDocument(token, file) {
+  if (!file) {
+    throw new Error("Dosya seçilmedi");
+  }
+
+  const isImage = file.type?.startsWith("image/");
+  return isImage
+    ? uploadImageDocument(token, file)
+    : uploadDocument(token, file);
+}
+
 export async function listModels(token) {
   const response = await fetch(`${API_BASE_URL}/models/`, {
     headers: getAuthHeaders(token),

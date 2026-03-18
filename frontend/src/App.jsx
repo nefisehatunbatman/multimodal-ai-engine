@@ -9,6 +9,7 @@ import {
   login,
   register,
   sendChat,
+  uploadAnyDocument,
 } from "./api";
 import { createMqttClient, subscribeToChatStream } from "./mqtt";
 
@@ -16,6 +17,9 @@ const DEFAULT_TEMPERATURE = 0.2;
 
 export default function App() {
   const [token, setToken] = useState(localStorage.getItem("token") || "");
+  const [accountName, setAccountName] = useState(
+    localStorage.getItem("username") || ""
+  );
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [authMode, setAuthMode] = useState("login");
@@ -31,8 +35,8 @@ export default function App() {
   const [selectedTemperature, setSelectedTemperature] =
     useState(DEFAULT_TEMPERATURE);
   const [prompt, setPrompt] = useState("");
-  const [imageFile, setImageFile] = useState(null);
   const [sending, setSending] = useState(false);
+  const [uploadingDocument, setUploadingDocument] = useState(false);
   const [error, setError] = useState("");
 
   const mqttClientRef = useRef(null);
@@ -78,6 +82,15 @@ export default function App() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  function formatDocumentName(doc) {
+    const rawName = doc?.file_name || doc?.title || `Belge ${doc?.id ?? ""}`;
+
+    return rawName
+      .replace(/\s*\[hash:[^\]]+\]/gi, "")
+      .replace(/\.md$/i, "")
+      .trim();
+  }
 
   async function bootstrapApp() {
     try {
@@ -140,7 +153,10 @@ export default function App() {
 
       const result = await login(username, password);
       localStorage.setItem("token", result.access_token);
+      localStorage.setItem("username", username);
+
       setToken(result.access_token);
+      setAccountName(username);
       setUsername("");
       setPassword("");
     } catch (err) {
@@ -212,6 +228,33 @@ export default function App() {
     });
   }
 
+  async function handleDocumentUpload(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      setUploadingDocument(true);
+      setError("");
+
+      await uploadAnyDocument(token, file);
+
+      const refreshedDocuments = await listDocuments(token, 1, 100);
+
+      const safeDocuments = Array.isArray(refreshedDocuments)
+        ? refreshedDocuments
+        : Array.isArray(refreshedDocuments?.documents)
+        ? refreshedDocuments.documents
+        : [];
+
+      setDocuments(safeDocuments);
+    } catch (err) {
+      setError(err.message || "Belge yüklenemedi");
+    } finally {
+      setUploadingDocument(false);
+      e.target.value = "";
+    }
+  }
+
   async function handleSendMessage(e) {
     e.preventDefault();
 
@@ -223,7 +266,6 @@ export default function App() {
     setError("");
 
     const currentPrompt = prompt;
-    const currentImage = imageFile;
 
     const tempUserMessage = {
       id: `temp-user-${Date.now()}`,
@@ -241,7 +283,6 @@ export default function App() {
 
     setMessages((prev) => [...prev, tempUserMessage, tempAssistantMessage]);
     setPrompt("");
-    setImageFile(null);
 
     try {
       unsubscribeRef.current?.();
@@ -253,7 +294,6 @@ export default function App() {
         documentIds: selectedDocumentIds,
         model: selectedModel,
         temperature: selectedTemperature,
-        imageFile: currentImage,
       });
 
       if (!mqttClientRef.current) {
@@ -331,7 +371,9 @@ export default function App() {
 
   function handleLogout() {
     localStorage.removeItem("token");
+    localStorage.removeItem("username");
     setToken("");
+    setAccountName("");
     setConversations([]);
     setMessages([]);
     setDocuments([]);
@@ -339,7 +381,6 @@ export default function App() {
     setActiveConversationId(null);
     setSelectedDocumentIds([]);
     setPrompt("");
-    setImageFile(null);
     setError("");
   }
 
@@ -395,11 +436,23 @@ export default function App() {
   return (
     <div className="layout">
       <aside className="sidebar">
+        <div className="sidebar-section account-section">
+          <div className="account-card">
+            <div className="account-avatar">
+              {(accountName || "U").charAt(0).toUpperCase()}
+            </div>
+            <div className="account-info">
+              <div className="account-label">Hesap</div>
+              <div className="account-name">{accountName || "Kullanıcı"}</div>
+            </div>
+            <button className="ghost-button logout-button" onClick={handleLogout}>
+              Çıkış
+            </button>
+          </div>
+        </div>
+
         <div className="sidebar-section">
           <button onClick={handleNewConversation}>+ Yeni Sohbet</button>
-          <button className="ghost-button" onClick={handleLogout}>
-            Çıkış
-          </button>
         </div>
 
         <div className="sidebar-section">
@@ -429,6 +482,19 @@ export default function App() {
 
         <div className="sidebar-section">
           <h3>Belgeler</h3>
+
+          <div className="document-upload-box">
+            <input
+              type="file"
+              accept=".pdf,.txt,.doc,.docx,.md,image/*"
+              onChange={handleDocumentUpload}
+              disabled={uploadingDocument}
+            />
+            {uploadingDocument && (
+              <div className="hint-box">Belge yükleniyor...</div>
+            )}
+          </div>
+
           <div className="document-list">
             {documents.map((doc) => (
               <label key={doc.id} className="checkbox-item">
@@ -437,7 +503,7 @@ export default function App() {
                   checked={selectedDocumentIds.includes(doc.id)}
                   onChange={() => toggleDocument(doc.id)}
                 />
-                <span>{doc.file_name || doc.title || `Belge ${doc.id}`}</span>
+                <span>{formatDocumentName(doc)}</span>
               </label>
             ))}
           </div>
@@ -520,20 +586,10 @@ export default function App() {
           />
 
           <div className="composer-footer">
-            <input
-              type="file"
-              accept="image/*"
-              onChange={(e) => setImageFile(e.target.files?.[0] || null)}
-            />
-
             <button type="submit" disabled={sending || !prompt.trim()}>
               {sending ? "Gönderiliyor..." : "Gönder"}
             </button>
           </div>
-
-          {imageFile && (
-            <div className="hint-box">Seçilen görsel: {imageFile.name}</div>
-          )}
         </form>
       </main>
     </div>
