@@ -163,7 +163,7 @@ async def retrieve_context(
         return ""
 
     formatted_contexts = [
-        f"[Belge Parçası {i + 1}]\n{ctx}"
+        f"[Bağlam {i + 1}]\n{ctx}"
         for i, ctx in enumerate(contexts[:5])
     ]
     return "\n\n---\n\n".join(formatted_contexts).strip()

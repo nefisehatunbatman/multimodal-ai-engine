@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   createConversation,
   deleteConversation,
+  getMe,
   listConversations,
   listDocuments,
   listMessages,
@@ -9,7 +10,10 @@ import {
   login,
   register,
   sendChat,
+  setUnauthorizedHandler,
   uploadAnyDocument,
+  updateUsername,
+  updatePassword,
 } from "./api";
 import { createMqttClient, subscribeToChatStream } from "./mqtt";
 
@@ -29,7 +33,14 @@ export default function App() {
   const [activeConversationId, setActiveConversationId] = useState(null);
   const [messages, setMessages] = useState([]);
   const [documents, setDocuments] = useState([]);
-  const [selectedDocumentIds, setSelectedDocumentIds] = useState([]);
+  const [selectedDocumentIds, setSelectedDocumentIds] = useState(() => {
+    const uname = localStorage.getItem("username") || "";
+    if (!uname) return [];
+    try {
+      const saved = localStorage.getItem(`selectedDocs_${uname}`);
+      return saved ? JSON.parse(saved) : [];
+    } catch { return []; }
+  });
   const [modelData, setModelData] = useState(null);
   const [selectedModel, setSelectedModel] = useState("");
   const [selectedTemperature, setSelectedTemperature] =
@@ -39,9 +50,64 @@ export default function App() {
   const [uploadingDocument, setUploadingDocument] = useState(false);
   const [error, setError] = useState("");
 
+  // Attachment panel state
+  const [showAttachPanel, setShowAttachPanel] = useState(false);
+  const [attachTab, setAttachTab] = useState("dokümanlar");
+  const attachPanelRef = useRef(null);
+
+  // Settings modal state
+  const [showSettings, setShowSettings] = useState(false);
+  const [settingsTab, setSettingsTab] = useState("hesap"); // "hesap" | "belgeler"
+  const [newUsername, setNewUsername] = useState("");
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [settingsError, setSettingsError] = useState("");
+  const [settingsSuccess, setSettingsSuccess] = useState("");
+  const [savingSettings, setSavingSettings] = useState(false);
+
   const mqttClientRef = useRef(null);
   const unsubscribeRef = useRef(null);
   const messagesEndRef = useRef(null);
+
+  // selectedDocumentIds degisince localStorage'a kaydet (kullanici bazli)
+  useEffect(() => {
+    if (!accountName) return;
+    localStorage.setItem(`selectedDocs_${accountName}`, JSON.stringify(selectedDocumentIds));
+  }, [selectedDocumentIds, accountName]);
+
+  // Global 401 handler — token expire olunca otomatik logout
+  useEffect(() => {
+    const handler = () => {
+      localStorage.removeItem("token");
+      localStorage.removeItem("username");
+      setToken("");
+      setAccountName("");
+      setConversations([]);
+      setMessages([]);
+      setDocuments([]);
+      setModelData(null);
+      setActiveConversationId(null);
+      setSelectedDocumentIds([]);
+      setPrompt("");
+      setError("Oturum süreniz doldu, lütfen tekrar giriş yapın.");
+    };
+    setUnauthorizedHandler(handler);
+    return () => setUnauthorizedHandler(null);
+  }, []);
+
+  // Close attach panel when clicking outside
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (attachPanelRef.current && !attachPanelRef.current.contains(e.target)) {
+        setShowAttachPanel(false);
+      }
+    }
+    if (showAttachPanel) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showAttachPanel]);
 
   const categories = Array.isArray(modelData?.categories)
     ? modelData.categories
@@ -85,12 +151,28 @@ export default function App() {
 
   function formatDocumentName(doc) {
     const rawName = doc?.file_name || doc?.title || `Belge ${doc?.id ?? ""}`;
-
     return rawName
       .replace(/\s*\[hash:[^\]]+\]/gi, "")
+      .replace(/\s*\[user:[^\]]+\]/gi, "")
       .replace(/\.md$/i, "")
       .trim();
   }
+
+  // Categorize documents by type — 2 categories: dokümanlar & görseller
+  const IMAGE_EXTS = [".jpg", ".jpeg", ".png", ".gif", ".webp"];
+
+  function getDocCategory(doc) {
+    const name = (doc?.file_name || doc?.title || "").toLowerCase();
+    if ((doc?.title || "").startsWith("Görsel:") || (doc?.file_name || "").startsWith("Görsel:")) return "görseller";
+    const ext = name.match(/\.[^.]+$/)?.[0] || "";
+    if (IMAGE_EXTS.includes(ext)) return "görseller";
+    return "dokümanlar";
+  }
+
+  const categorizedDocs = {
+    dokümanlar: documents.filter((d) => getDocCategory(d) === "dokümanlar"),
+    görseller: documents.filter((d) => getDocCategory(d) === "görseller"),
+  };
 
   async function bootstrapApp() {
     try {
@@ -160,6 +242,10 @@ export default function App() {
 
       setToken(result.access_token);
       setAccountName(username);
+      try {
+        const saved = localStorage.getItem(`selectedDocs_${username}`);
+        setSelectedDocumentIds(saved ? JSON.parse(saved) : []);
+      } catch { setSelectedDocumentIds([]); }
       setUsername("");
       setPassword("");
     } catch (err) {
@@ -372,9 +458,70 @@ export default function App() {
     }
   }
 
+  async function handleUpdateUsername(e) {
+    e.preventDefault();
+    if (!newUsername.trim()) return;
+    setSavingSettings(true);
+    setSettingsError("");
+    setSettingsSuccess("");
+    try {
+      const oldName = accountName;
+      await updateUsername(token, newUsername.trim());
+      // Belge seçimlerini yeni kullanıcı adı key'ine taşı
+      const saved = localStorage.getItem(`selectedDocs_${oldName}`);
+      if (saved) {
+        localStorage.setItem(`selectedDocs_${newUsername.trim()}`, saved);
+        localStorage.removeItem(`selectedDocs_${oldName}`);
+      }
+      localStorage.setItem("username", newUsername.trim());
+      setAccountName(newUsername.trim());
+      setSettingsSuccess("Kullanıcı adı güncellendi!");
+      setNewUsername("");
+    } catch (err) {
+      setSettingsError(err.message || "Güncelleme başarısız");
+    } finally {
+      setSavingSettings(false);
+    }
+  }
+
+  async function handleUpdatePassword(e) {
+    e.preventDefault();
+    if (!currentPassword || !newPassword) return;
+    if (newPassword !== confirmPassword) {
+      setSettingsError("Yeni şifreler eşleşmiyor");
+      return;
+    }
+    setSavingSettings(true);
+    setSettingsError("");
+    setSettingsSuccess("");
+    try {
+      await updatePassword(token, currentPassword, newPassword);
+      setSettingsSuccess("Şifre güncellendi!");
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+    } catch (err) {
+      setSettingsError(err.message || "Şifre güncellenemedi");
+    } finally {
+      setSavingSettings(false);
+    }
+  }
+
+  function handleOpenSettings() {
+    setSettingsError("");
+    setSettingsSuccess("");
+    setNewUsername(accountName); // mevcut adı pre-fill et
+    setCurrentPassword("");
+    setNewPassword("");
+    setConfirmPassword("");
+    setSettingsTab("hesap");
+    setShowSettings(true);
+  }
+
   function handleLogout() {
     localStorage.removeItem("token");
     localStorage.removeItem("username");
+    // selectedDocs_<username> kasıtlı silinmiyor — sonraki girişte geri yüklenir
     setToken("");
     setAccountName("");
     setConversations([]);
@@ -451,6 +598,9 @@ export default function App() {
             <button className="ghost-button logout-button" onClick={handleLogout}>
               Çıkış
             </button>
+            <button className="ghost-button settings-button" onClick={handleOpenSettings} title="Ayarlar">
+              ⚙️
+            </button>
           </div>
         </div>
 
@@ -479,35 +629,6 @@ export default function App() {
                   ×
                 </button>
               </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="sidebar-section">
-          <h3>Belgeler</h3>
-
-          <div className="document-upload-box">
-            <input
-              type="file"
-              accept=".pdf,.txt,.doc,.docx,.md,image/*"
-              onChange={handleDocumentUpload}
-              disabled={uploadingDocument}
-            />
-            {uploadingDocument && (
-              <div className="hint-box">Belge yükleniyor...</div>
-            )}
-          </div>
-
-          <div className="document-list">
-            {documents.map((doc) => (
-              <label key={doc.id} className="checkbox-item">
-                <input
-                  type="checkbox"
-                  checked={selectedDocumentIds.includes(doc.id)}
-                  onChange={() => toggleDocument(doc.id)}
-                />
-                <span>{formatDocumentName(doc)}</span>
-              </label>
             ))}
           </div>
         </div>
@@ -589,12 +710,227 @@ export default function App() {
           />
 
           <div className="composer-footer">
-            <button type="submit" className="send-button" disabled={sending || !prompt.trim()} >
+            {/* Attach panel anchor */}
+            <div className="attach-wrapper" ref={attachPanelRef}>
+              <button
+                type="button"
+                className={`attach-button ${showAttachPanel ? "active" : ""}`}
+                onClick={() => setShowAttachPanel((p) => !p)}
+                title="Dosya ekle"
+              >
+                +
+                {selectedDocumentIds.length > 0 && (
+                  <span className="attach-badge">{selectedDocumentIds.length}</span>
+                )}
+              </button>
+
+              {showAttachPanel && (
+                <div className="attach-panel">
+                  <div className="attach-panel-header">
+                    <span>Dosya Ekle</span>
+                    <button
+                      type="button"
+                      className="attach-panel-close"
+                      onClick={() => setShowAttachPanel(false)}
+                    >
+                      ×
+                    </button>
+                  </div>
+
+                  {/* Tabs */}
+                  <div className="attach-tabs">
+                    {["dokümanlar", "görseller"].map((tab) => (
+                      <button
+                        key={tab}
+                        type="button"
+                        className={`attach-tab ${attachTab === tab ? "active" : ""}`}
+                        onClick={() => setAttachTab(tab)}
+                      >
+                        {tab === "dokümanlar" && "Dokümanlar"}
+                        {tab === "görseller" && "Görseller"}
+                        {categorizedDocs[tab].length > 0 && (
+                          <span className="tab-count">{categorizedDocs[tab].length}</span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Upload area */}
+                  <div className="attach-upload">
+                    <label className={`upload-label ${uploadingDocument ? "loading" : ""}`}>
+                      <input
+                        type="file"
+                        accept={
+                          attachTab === "görseller"
+                            ? "image/*"
+                            : ".pdf,.txt,.doc,.docx,.md"
+                        }
+                        onChange={handleDocumentUpload}
+                        disabled={uploadingDocument}
+                        style={{ display: "none" }}
+                      />
+                      {uploadingDocument ? "Yükleniyor..." : "+ Yeni dosya yükle"}
+                    </label>
+                  </div>
+
+                  {/* File list */}
+                  <div className="attach-list">
+                    {categorizedDocs[attachTab].length === 0 ? (
+                      <div className="attach-empty">Bu kategoride dosya yok</div>
+                    ) : (
+                      categorizedDocs[attachTab].map((doc) => (
+                        <label key={doc.id} className="attach-item">
+                          <input
+                            type="checkbox"
+                            checked={selectedDocumentIds.includes(doc.id)}
+                            onChange={() => toggleDocument(doc.id)}
+                          />
+                          <span className="attach-item-name">{formatDocumentName(doc)}</span>
+                        </label>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <button type="submit" className="send-button" disabled={sending || !prompt.trim()}>
               {sending ? "Gönderiliyor..." : "Gönder"}
             </button>
           </div>
         </form>
       </main>
+
+      {/* Settings Modal */}
+      {showSettings && (
+        <div className="modal-overlay" onClick={() => setShowSettings(false)}>
+          <div className="modal-box" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Ayarlar</h3>
+              <button className="modal-close" onClick={() => setShowSettings(false)}>×</button>
+            </div>
+
+            {/* Modal Tabs */}
+            <div className="modal-tabs">
+              <button
+                className={`modal-tab ${settingsTab === "hesap" ? "active" : ""}`}
+                onClick={() => { setSettingsTab("hesap"); setSettingsError(""); setSettingsSuccess(""); }}
+              >
+                 Hesap
+              </button>
+              <button
+                className={`modal-tab ${settingsTab === "belgeler" ? "active" : ""}`}
+                onClick={() => { setSettingsTab("belgeler"); setSettingsError(""); setSettingsSuccess(""); }}
+              >
+                 Varsayılan Belgeler
+              </button>
+            </div>
+
+            <div className="modal-body">
+              {settingsError && <div className="settings-error">{settingsError}</div>}
+              {settingsSuccess && <div className="settings-success">{settingsSuccess}</div>}
+
+              {settingsTab === "hesap" && (
+                <div className="settings-section">
+                  {/* Username update */}
+                  <div className="settings-group">
+                    <h4>Kullanıcı Adını Değiştir</h4>
+                    <form onSubmit={handleUpdateUsername}>
+                      <input
+                        type="text"
+                        placeholder={`Mevcut: ${accountName}`}
+                        value={newUsername}
+                        onChange={(e) => setNewUsername(e.target.value)}
+                      />
+                      <button type="submit" disabled={savingSettings || !newUsername.trim()}>
+                        {savingSettings ? "Kaydediliyor..." : "Güncelle"}
+                      </button>
+                    </form>
+                  </div>
+
+                  {/* Password update */}
+                  <div className="settings-group">
+                    <h4>Şifre Değiştir</h4>
+                    <form onSubmit={handleUpdatePassword}>
+                      <input
+                        type="password"
+                        placeholder="Mevcut şifre"
+                        value={currentPassword}
+                        onChange={(e) => setCurrentPassword(e.target.value)}
+                      />
+                      <input
+                        type="password"
+                        placeholder="Yeni şifre"
+                        value={newPassword}
+                        onChange={(e) => setNewPassword(e.target.value)}
+                      />
+                      <input
+                        type="password"
+                        placeholder="Yeni şifre (tekrar)"
+                        value={confirmPassword}
+                        onChange={(e) => setConfirmPassword(e.target.value)}
+                      />
+                      <button
+                        type="submit"
+                        disabled={savingSettings || !currentPassword || !newPassword || !confirmPassword}
+                      >
+                        {savingSettings ? "Kaydediliyor..." : "Şifreyi Güncelle"}
+                      </button>
+                    </form>
+                  </div>
+                </div>
+              )}
+
+              {settingsTab === "belgeler" && (
+                <div className="settings-section">
+                  <p className="settings-hint">
+                    Aşağıdan seçtiğiniz belgeler tüm sohbetlerde varsayılan olarak aktif olacak.
+                  </p>
+
+                  {/* Category tabs inside settings */}
+                  <div className="attach-tabs" style={{ marginBottom: 8 }}>
+                    {["dokümanlar", "görseller"].map((tab) => (
+                      <button
+                        key={tab}
+                        type="button"
+                        className={`attach-tab ${attachTab === tab ? "active" : ""}`}
+                        onClick={() => setAttachTab(tab)}
+                      >
+                        {tab === "dokümanlar" && "Dokümanlar"}
+                        {tab === "görseller" && "Görseller"}
+                        {categorizedDocs[tab].length > 0 && (
+                          <span className="tab-count">{categorizedDocs[tab].length}</span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="settings-doc-list">
+                    {categorizedDocs[attachTab].length === 0 ? (
+                      <div className="attach-empty">Bu kategoride dosya yok</div>
+                    ) : (
+                      categorizedDocs[attachTab].map((doc) => (
+                        <label key={doc.id} className="attach-item">
+                          <input
+                            type="checkbox"
+                            checked={selectedDocumentIds.includes(doc.id)}
+                            onChange={() => toggleDocument(doc.id)}
+                          />
+                          <span className="attach-item-name">{formatDocumentName(doc)}</span>
+                        </label>
+                      ))
+                    )}
+                  </div>
+
+                  <div className="settings-hint" style={{ marginTop: 10 }}>
+                    {selectedDocumentIds.length} belge seçili
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

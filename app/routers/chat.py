@@ -50,6 +50,8 @@ def build_system_prompt() -> str:
 Sen yardımcı bir asistansın. Sana belge bağlamı sağlandığında önce onu kullan.
 Belgede bilgi yoksa veya yetersizse kendi bilginle cevap ver.
 Kullanıcıya her zaman faydalı ve dolu bir cevap sun.
+ÖNEMLİ: Cevaplarında asla "[Belge Parçası X]", "[Kaynak X]", "[Bağlam]" gibi iç etiketleri kullanma.
+Bilgiyi doğal ve akıcı bir dille, sanki kendin biliyormuşsun gibi anlat.
 """.strip()
     return f"{base}\n\n{rag_rules}"
 

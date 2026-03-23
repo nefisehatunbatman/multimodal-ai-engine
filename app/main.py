@@ -4,6 +4,7 @@ from app.db.postgres import Base, engine
 from app.models.conversation import Conversation  # noqa: F401
 from app.models.message import Message  # noqa: F401
 from app.models.user import User  # noqa: F401
+from app.models.user_document import UserDocument  # noqa: F401
 from app.routers.user import router as users_router
 from app.routers.auth import router as auth_router
 from app.routers.conversation import router as conversation_router
