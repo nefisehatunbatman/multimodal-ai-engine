@@ -15,7 +15,6 @@ def create_conversation(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    # user_id artık payload'dan değil, token'dan alınıyor — güvenlik açığı kapatıldı
     conversation = Conversation(
         user_id=current_user.id,
         title=payload.title or "Yeni Sohbet",
