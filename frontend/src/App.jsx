@@ -693,7 +693,11 @@ export default function App() {
               <div className="message-role">
                 {msg.role === "user" ? "Sen" : "Asistan"}
               </div>
-              <div className="message-content">{msg.content || ""}</div>
+              <div className="message-content">
+                 {msg.role === "assistant" && !msg.content && msg.meta?.status === "streaming"
+                 ? <span className="typing-dots"><span/><span/><span/></span>
+                 : msg.content || ""}
+              </div>
             </div>
           ))}
           <div ref={messagesEndRef} />

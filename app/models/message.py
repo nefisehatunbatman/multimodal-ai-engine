@@ -13,7 +13,7 @@ class Message(Base):
 
     role = Column(String(20), nullable=False)   # "user" | "assistant" | "system"
     content = Column(Text, nullable=False)
-    meta = Column(JSONB, nullable=True)
+    meta = Column(JSONB, nullable=True)#esnek bicimde verileri json formatinda tutmamizi saglar
 
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 

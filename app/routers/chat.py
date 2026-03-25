@@ -55,14 +55,14 @@ Bilgiyi doğal ve akıcı bir dille, sanki kendin biliyormuşsun gibi anlat.
 """.strip()
     return f"{base}\n\n{rag_rules}"
 
-
+#llmden gelen cevabi temizler
 def _safe_extract_assistant_text(data: Dict[str, Any]) -> str:
     try:
         choices = data.get("choices")
         if not choices:
             raise KeyError("choices is missing/empty")
 
-        msg = choices[0].get("message")
+        msg = choices[0].get("message")#API birden fazla cevap sunabilir
         if not msg:
             raise KeyError("choices[0].message is missing")
 
@@ -170,6 +170,7 @@ async def call_openrouter_stream(
         raise HTTPException(status_code=500, detail="OPENROUTER_API_KEY is missing in .env")
 
     async with httpx.AsyncClient(timeout=60) as client:
+        #normal post degil stream kullandik
         async with client.stream(
             "POST",
             "https://openrouter.ai/api/v1/chat/completions",
@@ -186,11 +187,11 @@ async def call_openrouter_stream(
         ) as r:
             r.raise_for_status()
 
-            async for line in r.aiter_lines():
+            async for line in r.aiter_lines():#sunucudan gelen cevabi satir satir oku
                 if not line.startswith("data:"):
                     continue
 
-                data_str = line[5:].strip()
+                data_str = line[5:].strip()#gelen verinin basinda data yaziyor data yazan kismi kesiyoruz
 
                 if data_str == "[DONE]":
                     break
@@ -199,10 +200,10 @@ async def call_openrouter_stream(
                     continue
 
                 try:
-                    chunk = json.loads(data_str)
+                    chunk = json.loads(data_str)#jsonı stringe cevirdik
                     token = chunk.get("choices", [{}])[0].get("delta", {}).get("content")
                     if token:
-                        yield token
+                        yield token#return tek seferde döner yield parca parca
                 except Exception:
                     continue
 
@@ -213,7 +214,7 @@ def _build_text_messages(
     context: str,
 ) -> List[Dict[str, Any]]:
     llm_history = build_base_history_messages(history)
-
+#son mesaj hem dbye historye kaydediliyor hem apıye gönderiliyor aynı soru iki kere gitmesin diye dbden son mesaj siliniyor
     if llm_history and llm_history[-1]["role"] == "user":
         llm_history = llm_history[:-1]
 
@@ -274,7 +275,7 @@ async def _build_llm_messages(
 
     return _build_text_messages(history, message, context), False
 
-
+#stream cevap uretmeye basliyoruz
 async def run_chat_streaming_task(
     conversation_id: int,
     assistant_message_id: int,
@@ -354,7 +355,7 @@ async def run_chat_streaming_task(
 
         assistant_msg.content = full_text
         assistant_msg.meta = {
-            **(assistant_msg.meta or {}),
+            **(assistant_msg.meta or {}),#eski meta bilgilerini koru yeni meta bilgileri ekle unpacking
             "status": "completed",
             "model": used_model,
             "latency_ms": latency_ms,

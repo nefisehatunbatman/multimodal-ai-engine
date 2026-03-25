@@ -11,6 +11,6 @@ class UserDocument(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, nullable=False, index=True)
-    knowledge_id = Column(String, nullable=False, index=True)
+    knowledge_id = Column(String, nullable=False, index=True)#weknora bizim dbde olmadigi icin fk kullanmadik
     filename = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
