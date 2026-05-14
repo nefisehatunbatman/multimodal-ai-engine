@@ -6,6 +6,7 @@ Hem metinsel (PDF, DOCX, TXT) hem de görsel verileri anlayan, indeksleyen ve bu
 
 ---
 
+
 ## İçindekiler
 
 - [Mimari Genel Bakış](#mimari-genel-bakış)
