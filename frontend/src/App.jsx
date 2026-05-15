@@ -259,6 +259,7 @@ export default function App() {
     try {
       setError("");
       setActiveConversationId(conversationId);
+      setSelectedDocumentIds([]);
 
       const data = await listMessages(token, conversationId);
       setMessages(Array.isArray(data) ? data : []);
@@ -273,6 +274,7 @@ export default function App() {
       const newConversation = await createConversation(token);
       setConversations((prev) => [newConversation, ...prev]);
       setActiveConversationId(newConversation.id);
+      setSelectedDocumentIds([]);
       setMessages([]);
     } catch (err) {
       setError(err.message || "Yeni sohbet oluşturulamadı");

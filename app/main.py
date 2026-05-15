@@ -1,15 +1,30 @@
+"""
+main.py — ChatRoomMemory modeli import edildi.
+Mevcut main.py'ne sadece işaretli satırları ekle.
+"""
+
+# ── Mevcut import'ların altına ekle ───────────────────────────────────────────
+# from app.memory.models.chat_room_memory import ChatRoomMemory  # noqa: F401
+
+# ── create_tables() içinde otomatik oluşturulur (Base.metadata.create_all) ───
+# Alembic kullanıyorsan bu satırı kaldır, migration çalıştır.
+
+# ── Tam main.py (mevcut dosyanla birleştir) ───────────────────────────────────
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.db.postgres import Base, engine
-from app.models.conversation import Conversation  # noqa: F401
-from app.models.message import Message  # noqa: F401
-from app.models.user import User  # noqa: F401
-from app.models.user_document import UserDocument  # noqa: F401
+from app.models.conversation import Conversation          # noqa: F401
+from app.models.message import Message                    # noqa: F401
+from app.models.user import User                          # noqa: F401
+from app.models.user_document import UserDocument         # noqa: F401
+from app.memory.models.chat_room_memory import ChatRoomMemory  # noqa: F401  ← YENİ
+
 from app.routers.user import router as users_router
 from app.routers.auth import router as auth_router
 from app.routers.conversation import router as conversation_router
 from app.routers.messages import router as messages_router
-from app.routers.chat import router as chat_router
+from app.routers.chat import router as chat_router          # güncellenmiş router
 from app.routers.documents import router as documents_router
 from app.routers.health import router as health_router
 from app.routers.models import router as models_router
@@ -17,7 +32,7 @@ from app.routers.models import router as models_router
 app = FastAPI(
     title="Multimodal AI Engine",
     description="RAG, Vision & Real-Time Messaging API. JWT ile kimlik doğrulama gerektirir.",
-    version="1.0.0",
+    version="2.0.0",  # hafıza mimarisi eklendi
 )
 
 app.add_middleware(
@@ -36,14 +51,14 @@ app.add_middleware(
 
 @app.on_event("startup")
 def create_tables():
-    """Postgres'te tablolar yoksa oluşturur."""
+    """Postgres'te tablolar yoksa oluşturur. ChatRoomMemory de dahil."""
     Base.metadata.create_all(bind=engine)
 
 
 @app.get("/", tags=["root"])
 def root():
     return {
-        "message": "Multimodal AI Engine API",
+        "message": "Multimodal AI Engine API v2 — İki Seviyeli Hafıza Aktif",
         "health": "/health",
         "docs": "/docs",
         "redoc": "/redoc",

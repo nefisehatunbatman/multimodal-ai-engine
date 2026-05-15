@@ -26,14 +26,17 @@ from app.services.mqtt import (
     get_stream_topic,
     get_done_topic,
 )
+from app.memory.l1_memory import L1MemoryManager
+from app.memory.l2_memory import get_l2_context_string, trigger_l2_update
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
 DEFAULT_SYSTEM_PROMPT = getattr(settings, "DEFAULT_SYSTEM_PROMPT", None) or "You are a helpful assistant."
-MAX_HISTORY_MESSAGES = int(getattr(settings, "MAX_HISTORY_MESSAGES", 6))
+MAX_HISTORY_MESSAGES = int(getattr(settings, "MAX_HISTORY_MESSAGES", 20))
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
+CHARS_PER_TOKEN = 4
 
 
 def build_base_history_messages(history: List[Message]) -> List[Dict[str, str]]:
@@ -44,7 +47,7 @@ def build_base_history_messages(history: List[Message]) -> List[Dict[str, str]]:
     return llm_messages
 
 
-def build_system_prompt() -> str:
+def build_system_prompt(l1_context: str = "", l2_context: str = "", has_context: bool = False) -> str:
     base = DEFAULT_SYSTEM_PROMPT.strip()
     rag_rules = """
 Sen yardımcı bir asistansın. Sana belge bağlamı sağlandığında önce onu kullan.
@@ -53,16 +56,35 @@ Kullanıcıya her zaman faydalı ve dolu bir cevap sun.
 ÖNEMLİ: Cevaplarında asla "[Belge Parçası X]", "[Kaynak X]", "[Bağlam]" gibi iç etiketleri kullanma.
 Bilgiyi doğal ve akıcı bir dille, sanki kendin biliyormuşsun gibi anlat.
 """.strip()
-    return f"{base}\n\n{rag_rules}"
 
-#llmden gelen cevabi temizler
+    parts = [f"{base}\n\n{rag_rules}"]
+
+    if l2_context.strip():
+        parts.append(
+            "---\n"
+            "## Kullanıcı Profili (Uzun Vadeli Hafıza)\n"
+            f"{l2_context.strip()}\n"
+            "---"
+        )
+
+    if l1_context.strip():
+        parts.append(
+            "---\n"
+            "## Bu Konuşmanın Özeti (Kısa Vadeli Hafıza)\n"
+            f"{l1_context.strip()}\n"
+            "---"
+        )
+
+    return "\n\n".join(parts)
+
+
 def _safe_extract_assistant_text(data: Dict[str, Any]) -> str:
     try:
         choices = data.get("choices")
         if not choices:
             raise KeyError("choices is missing/empty")
 
-        msg = choices[0].get("message")#API birden fazla cevap sunabilir
+        msg = choices[0].get("message")
         if not msg:
             raise KeyError("choices[0].message is missing")
 
@@ -161,6 +183,21 @@ def _parse_document_ids(document_ids_str: str) -> Optional[List[str]]:
     return [d.strip() for d in document_ids_str.split(",") if d.strip()]
 
 
+def _estimate_messages_chars(messages: List[Dict[str, Any]]) -> int:
+    total = 0
+    for m in messages:
+        content = m.get("content", "")
+        if isinstance(content, str):
+            total += len(content)
+        elif isinstance(content, list):
+            for item in content:
+                if isinstance(item, dict):
+                    total += len(item.get("text", ""))
+                    if item.get("type") == "image_url":
+                        total += 340
+    return total
+
+
 async def call_openrouter_stream(
     messages: List[Dict[str, Any]],
     model: Optional[str] = None,
@@ -170,7 +207,6 @@ async def call_openrouter_stream(
         raise HTTPException(status_code=500, detail="OPENROUTER_API_KEY is missing in .env")
 
     async with httpx.AsyncClient(timeout=60) as client:
-        #normal post degil stream kullandik
         async with client.stream(
             "POST",
             "https://openrouter.ai/api/v1/chat/completions",
@@ -187,11 +223,11 @@ async def call_openrouter_stream(
         ) as r:
             r.raise_for_status()
 
-            async for line in r.aiter_lines():#sunucudan gelen cevabi satir satir oku
+            async for line in r.aiter_lines():
                 if not line.startswith("data:"):
                     continue
 
-                data_str = line[5:].strip()#gelen verinin basinda data yaziyor data yazan kismi kesiyoruz
+                data_str = line[5:].strip()
 
                 if data_str == "[DONE]":
                     break
@@ -200,10 +236,10 @@ async def call_openrouter_stream(
                     continue
 
                 try:
-                    chunk = json.loads(data_str)#jsonı stringe cevirdik
+                    chunk = json.loads(data_str)
                     token = chunk.get("choices", [{}])[0].get("delta", {}).get("content")
                     if token:
-                        yield token#return tek seferde döner yield parca parca
+                        yield token
                 except Exception:
                     continue
 
@@ -212,10 +248,12 @@ def _build_text_messages(
     history: List[Message],
     message: str,
     context: str,
+    l1_context: str = "",
+    l2_context: str = "",
 ) -> List[Dict[str, Any]]:
     llm_history = build_base_history_messages(history)
-#son mesaj hem dbye historye kaydediliyor hem apıye gönderiliyor aynı soru iki kere gitmesin diye dbden son mesaj siliniyor
-    if llm_history and llm_history[-1]["role"] == "user":
+
+    if llm_history and llm_history[-1]["role"] == "user" and llm_history[-1]["content"] == message:
         llm_history = llm_history[:-1]
 
     if context:
@@ -227,14 +265,10 @@ def _build_text_messages(
             f"[Soru]\n{message}"
         )
     else:
-        user_content = (
-            "Belge bağlamı bulunamadı.\n"
-            "Kendi bilginle normal bir asistan gibi cevap ver.\n\n"
-            f"[Soru]\n{message}"
-        )
+        user_content = message
 
     return [
-        {"role": "system", "content": build_system_prompt()},
+        {"role": "system", "content": build_system_prompt(l1_context, l2_context, has_context=bool(context))},
         *llm_history,
         {"role": "user", "content": user_content},
     ]
@@ -245,10 +279,12 @@ async def _build_llm_messages(
     message: str,
     context: str,
     image: Optional[UploadFile],
+    l1_context: str = "",
+    l2_context: str = "",
 ) -> tuple[List[Dict[str, Any]], bool]:
     llm_history = build_base_history_messages(history)
 
-    if llm_history and llm_history[-1]["role"] == "user":
+    if llm_history and llm_history[-1]["role"] == "user" and llm_history[-1]["content"] == message:
         llm_history = llm_history[:-1]
 
     if image is not None:
@@ -270,12 +306,12 @@ async def _build_llm_messages(
             question=message,
             context=context,
             history=llm_history,
-            system_prompt=build_system_prompt(),
+            system_prompt=build_system_prompt(l1_context, l2_context, has_context=bool(context)),
         ), True
 
-    return _build_text_messages(history, message, context), False
+    return _build_text_messages(history, message, context, l1_context, l2_context), False
 
-#stream cevap uretmeye basliyoruz
+
 async def run_chat_streaming_task(
     conversation_id: int,
     assistant_message_id: int,
@@ -285,6 +321,7 @@ async def run_chat_streaming_task(
     is_vision: bool,
     selected_model: Optional[str],
     temperature: Optional[float],
+    user_id: int,
 ):
     db: Session = SessionLocal()
 
@@ -355,7 +392,7 @@ async def run_chat_streaming_task(
 
         assistant_msg.content = full_text
         assistant_msg.meta = {
-            **(assistant_msg.meta or {}),#eski meta bilgilerini koru yeni meta bilgileri ekle unpacking
+            **(assistant_msg.meta or {}),
             "status": "completed",
             "model": used_model,
             "latency_ms": latency_ms,
@@ -363,6 +400,40 @@ async def run_chat_streaming_task(
         db.add(assistant_msg)
         db.commit()
         db.refresh(assistant_msg)
+
+        # ── L1 Hafıza güncelleme (token tabanlı) ──────────────────────────
+        try:
+            history_chars = _estimate_messages_chars(llm_messages)
+            response_chars = len(full_text)
+            current_total_tokens = (history_chars + response_chars) // CHARS_PER_TOKEN
+
+            l1_manager = L1MemoryManager(db)
+
+            logger.info(
+                "L1 token debug: conversation_id=%d current_tokens=%d needs_update=%s",
+                conversation_id,
+                current_total_tokens,
+                l1_manager.needs_update(conversation_id, user_id, current_total_tokens),
+            )
+
+            l1_updated = await l1_manager.maybe_update(
+                conversation_id=conversation_id,
+                user_id=user_id,
+                messages=llm_messages + [{"role": "assistant", "content": full_text}],
+                current_total_tokens=current_total_tokens,
+            )
+
+            if l1_updated:
+                logger.info(
+                    "L1 güncellendi, L2 tetikleniyor: conversation_id=%d user_id=%d",
+                    conversation_id,
+                    user_id,
+                )
+                # ── DÜZELTME: db parametresi yok, L2 kendi session'ını açar ──
+                trigger_l2_update(user_id=user_id)
+
+        except Exception as mem_err:
+            logger.warning("Hafıza güncelleme başarısız (kritik değil): %s", mem_err)
 
     except Exception as e:
         logger.exception(
@@ -414,6 +485,17 @@ async def chat(
 ):
     conv = _get_conversation_or_403(conversation_id, current_user, db)
     parsed_doc_ids = _parse_document_ids(document_ids)
+    logger.info("DEBUG document_ids raw='%s' parsed=%s", document_ids, parsed_doc_ids)
+
+    # ── L1 + L2 hafıza bağlamını al ───────────────────────────────────────
+    l1_manager = L1MemoryManager(db)
+    l1_context = l1_manager.get_context_string(conversation_id)
+    l2_context = get_l2_context_string(db, current_user.id)
+
+    if l1_context:
+        logger.info("L1 bağlamı yüklendi: conversation_id=%d", conversation_id)
+    if l2_context:
+        logger.info("L2 bağlamı yüklendi: user_id=%d", current_user.id)
 
     user_msg = Message(
         conversation_id=conversation_id,
@@ -445,10 +527,21 @@ async def chat(
         .all()
     )[::-1]
 
-    context = await retrieve_context(message, document_ids=parsed_doc_ids)
-    llm_messages, is_vision = await _build_llm_messages(history, message, context, image)
+    if parsed_doc_ids:
+        context = await retrieve_context(message, document_ids=parsed_doc_ids)
+    else:
+        context = ""
 
-    used_model = model or (VISION_MODEL if is_vision else None) or settings.OPENROUTER_MODEL_PRIMARY or "openai/gpt-4o-mini"
+    llm_messages, is_vision = await _build_llm_messages(
+        history, message, context, image, l1_context, l2_context
+    )
+
+    used_model = (
+        model
+        or (VISION_MODEL if is_vision else None)
+        or settings.OPENROUTER_MODEL_PRIMARY
+        or "openai/gpt-4o-mini"
+    )
 
     assistant_msg = Message(
         conversation_id=conversation_id,
@@ -460,6 +553,8 @@ async def chat(
             "model": used_model,
             "rag_context_used": bool(context),
             "rag_context_length": len(context) if context else 0,
+            "l1_context_used": bool(l1_context),
+            "l2_context_used": bool(l2_context),
         },
     )
     db.add(assistant_msg)
@@ -479,6 +574,7 @@ async def chat(
             is_vision=is_vision,
             selected_model=model,
             temperature=temperature,
+            user_id=current_user.id,
         )
     )
 
@@ -489,3 +585,31 @@ async def chat(
         stream_topic=stream_topic,
         done_topic=done_topic,
     )
+
+
+# ── Debug endpoint ─────────────────────────────────────────────────────────────
+
+@router.get("/memory/stats/{conversation_id}")
+def memory_stats(
+    conversation_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """L1 ve L2 hafıza istatistiklerini döndürür."""
+    _get_conversation_or_403(conversation_id, current_user, db)
+
+    l1_manager = L1MemoryManager(db)
+    l1_stats = l1_manager.get_stats(conversation_id)
+    l2_profile = current_user.global_memory or {}
+
+    return {
+        "conversation_id": conversation_id,
+        "user_id": current_user.id,
+        "l1": l1_stats,
+        "l2": {
+            "has_profile": bool(l2_profile),
+            "interests_count": len(l2_profile.get("interests", [])),
+            "decisions_count": len(l2_profile.get("decisions", [])),
+            "last_updated": l2_profile.get("updated_at"),
+        },
+    }
