@@ -28,6 +28,7 @@ from app.services.mqtt import (
 )
 from app.memory.l1_memory import L1MemoryManager
 from app.memory.l2_memory import get_l2_context_string, trigger_l2_update
+from app.memory.token_budget import TokenBudget
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +38,34 @@ DEFAULT_SYSTEM_PROMPT = getattr(settings, "DEFAULT_SYSTEM_PROMPT", None) or "You
 MAX_HISTORY_MESSAGES = int(getattr(settings, "MAX_HISTORY_MESSAGES", 20))
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
 CHARS_PER_TOKEN = 4
+
+# Model bazında context limit tahmini (token_budget için)
+# Tam liste models.py'deki MODEL_CATALOG'dan t� retilir;
+# burada yaygın modeller için hızlı bakı\u015f tablosu yeterli.
+_MODEL_CONTEXT_LIMITS: dict[str, int] = {
+    "meta-llama/llama-3.1-8b-instruct:free": 131072,
+    "meta-llama/llama-3.2-3b-instruct:free": 131072,
+    "google/gemma-2-9b-it:free": 8192,
+    "mistralai/mistral-7b-instruct:free": 32768,
+    "openai/gpt-4o-mini": 128000,
+    "openai/gpt-4o": 128000,
+    "google/gemini-flash-1.5": 1000000,
+    "google/gemini-2.0-flash-001": 1048576,
+    "anthropic/claude-haiku-4-5": 200000,
+    "anthropic/claude-sonnet-4.5": 200000,
+    "anthropic/claude-sonnet-4.6": 200000,
+    "mistralai/mistral-small-3.1-24b-instruct": 128000,
+    "google/gemini-pro-1.5": 2000000,
+    "openai/o3-mini": 200000,
+}
+_DEFAULT_CONTEXT_LIMIT = 8192  # bilinmeyen modeller için güvenli varsayılan
+
+
+def _get_model_context_limit(model_id: str) -> int:
+    """Model ID'sine göre context window token limitini dönd� r� r."""
+    return _MODEL_CONTEXT_LIMITS.get(model_id, _DEFAULT_CONTEXT_LIMIT)
+
+
 
 
 def build_base_history_messages(history: List[Message]) -> List[Dict[str, str]]:
@@ -62,7 +91,10 @@ Bilgiyi doğal ve akıcı bir dille, sanki kendin biliyormuşsun gibi anlat.
     if l2_context.strip():
         parts.append(
             "---\n"
-            "## Kullanıcı Profili (Uzun Vadeli Hafıza)\n"
+            "## Kullanıcı Hakkında Bilinen Gerçekler\n"
+            "Aşağıdaki bilgiler kullanıcının önceki konuşmalarından öğrenilmiştir. "
+            "Bu bilgileri kesin doğru kabul et, kullanıcı sana sorduğunda doğrudan kullan, "
+            "'bilmiyorum' deme:\n"
             f"{l2_context.strip()}\n"
             "---"
         )
@@ -76,7 +108,6 @@ Bilgiyi doğal ve akıcı bir dille, sanki kendin biliyormuşsun gibi anlat.
         )
 
     return "\n\n".join(parts)
-
 
 def _safe_extract_assistant_text(data: Dict[str, Any]) -> str:
     try:
@@ -250,6 +281,7 @@ def _build_text_messages(
     context: str,
     l1_context: str = "",
     l2_context: str = "",
+    context_limit: int = 8192,
 ) -> List[Dict[str, Any]]:
     llm_history = build_base_history_messages(history)
 
@@ -258,18 +290,40 @@ def _build_text_messages(
 
     if context:
         user_content = (
-            "Aşağıda belge bağlamı verilmiştir.\n"
-            "Kullanıcının sorusuna birebir cevap olmasa bile, bağlamdaki ilgili tüm bilgileri kullanıcıya sun.\n"
-            "Bağlamda hiç ilgili bilgi yoksa kendi genel bilginle cevap ver.\n\n"
-            f"[Bağlam]\n{context}\n\n"
+            "A\u015fa\u011f\u0131da belge ba\u011flam\u0131 verilmi\u015ftir.\n"
+            "Kullan\u0131c\u0131n\u0131n sorusuna birebir cevap olmasa bile, ba\u011flamdaki ilgili t\u00fcm bilgileri kullan\u0131c\u0131ya sun.\n"
+            "Ba\u011flamda hi\u00e7 ilgili bilgi yoksa kendi genel bilginle cevap ver.\n\n"
+            f"[Ba\u011flam]\n{context}\n\n"
             f"[Soru]\n{message}"
         )
     else:
         user_content = message
 
+    system_prompt = build_system_prompt(l1_context, l2_context, has_context=bool(context))
+
+    # \u2500\u2500 Token B\u00fct\u00e7eleme \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+    # Ge\u00e7mi\u015f mesajlar\u0131 context_limit'e g\u00f6re k\u0131rp; en yeni mesajlar korunur.
+    budget = TokenBudget(context_limit=context_limit, reserve_for_output=1024)
+    allocation = budget.allocate(
+        system_prompt=system_prompt,
+        l1_summary=l1_context,
+        l2_memory=l2_context,
+        history_messages=llm_history,
+        new_user_message=user_content,
+    )
+
+    if allocation.history_was_truncated:
+        dropped = len(llm_history) - len(allocation.history_messages)
+        logger.info(
+            "Token budget: %d eski mesaj k\u0131rp\u0131ld\u0131, toplam kullan\u0131m=%d/%d",
+            dropped,
+            allocation.total_used,
+            allocation.context_limit,
+        )
+
     return [
-        {"role": "system", "content": build_system_prompt(l1_context, l2_context, has_context=bool(context))},
-        *llm_history,
+        {"role": "system", "content": system_prompt},
+        *allocation.history_messages,
         {"role": "user", "content": user_content},
     ]
 
@@ -281,6 +335,7 @@ async def _build_llm_messages(
     image: Optional[UploadFile],
     l1_context: str = "",
     l2_context: str = "",
+    context_limit: int = 8192,
 ) -> tuple[List[Dict[str, Any]], bool]:
     llm_history = build_base_history_messages(history)
 
@@ -309,7 +364,7 @@ async def _build_llm_messages(
             system_prompt=build_system_prompt(l1_context, l2_context, has_context=bool(context)),
         ), True
 
-    return _build_text_messages(history, message, context, l1_context, l2_context), False
+    return _build_text_messages(history, message, context, l1_context, l2_context, context_limit=context_limit), False
 
 
 async def run_chat_streaming_task(
@@ -402,12 +457,17 @@ async def run_chat_streaming_task(
         db.refresh(assistant_msg)
 
         # ── L1 Hafıza güncelleme (token tabanlı) ──────────────────────────
+        print(f"[MEMORY DEBUG] conversation_id={conversation_id} user_id={user_id}", flush=True)
+        
         try:
             history_chars = _estimate_messages_chars(llm_messages)
             response_chars = len(full_text)
             current_total_tokens = (history_chars + response_chars) // CHARS_PER_TOKEN
 
+            
             l1_manager = L1MemoryManager(db)
+
+            print(f"[MEMORY DEBUG] tokens={current_total_tokens} needs_update={l1_manager.needs_update(conversation_id, user_id, current_total_tokens)}", flush=True)
 
             logger.info(
                 "L1 token debug: conversation_id=%d current_tokens=%d needs_update=%s",
@@ -532,15 +592,22 @@ async def chat(
     else:
         context = ""
 
-    llm_messages, is_vision = await _build_llm_messages(
-        history, message, context, image, l1_context, l2_context
-    )
+    # is_vision on-heuristic: image varligi ve content_type kontrolu
+    _is_vision_hint = image is not None and (image.content_type or "") in ALLOWED_IMAGE_TYPES
 
     used_model = (
         model
-        or (VISION_MODEL if is_vision else None)
+        or (VISION_MODEL if _is_vision_hint else None)
         or settings.OPENROUTER_MODEL_PRIMARY
         or "openai/gpt-4o-mini"
+    )
+
+    # context_limit: secili modelin katalog degeri, yoksa guvenli varsayilan
+    _model_context_limit = _get_model_context_limit(used_model)
+
+    llm_messages, is_vision = await _build_llm_messages(
+        history, message, context, image, l1_context, l2_context,
+        context_limit=_model_context_limit,
     )
 
     assistant_msg = Message(

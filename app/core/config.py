@@ -37,6 +37,12 @@ class Settings:
     MQTT_PORT: int = int(os.getenv("MQTT_PORT", "1883"))
     MQTT_USERNAME: str = os.getenv("MQTT_USERNAME", "admin")
     MQTT_PASSWORD: str = os.getenv("MQTT_PASSWORD", "public")
+    # -------------------------
+    # Memory
+    # -------------------------
+    L1_TRIGGER_TOKENS: int = int(os.getenv("L1_TRIGGER_TOKENS", "2000"))
+    L1_INCREMENT_TOKENS: int = int(os.getenv("L1_INCREMENT_TOKENS", "500"))
+    L2_DEBOUNCE_SECONDS: float = float(os.getenv("L2_DEBOUNCE_SECONDS", "15.0"))
 
     # -------------------------
     # App

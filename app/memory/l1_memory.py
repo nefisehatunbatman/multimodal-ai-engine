@@ -11,8 +11,8 @@ Token tabanlı tetikleme:
 
 Düzeltme:
 - Sistem mesajları (role="system") artık özet ve key_facts'e dahil edilmiyor.
-  Bu sayede RAG kuralları ve sistem promptu kullanıcı kararı olarak yanlış
-  yorumlanmıyor.
+- filter_important kaldırıldı: tüm user/assistant mesajları LLM'e gönderiliyor.
+  Bu sayede adı, yaşı, kitap gibi kişisel bilgiler özete giriyor.
 """
 from __future__ import annotations
 
@@ -28,8 +28,8 @@ from app.memory.importance_scorer import ImportanceScorer
 logger = logging.getLogger(__name__)
 
 # ── Eşik değerleri ────────────────────────────────────────────────────────────
-L1_TRIGGER_TOKENS: int = int(getattr(settings, "L1_TRIGGER_TOKENS", 200))
-L1_INCREMENT_TOKENS: int = int(getattr(settings, "L1_INCREMENT_TOKENS", 200))
+L1_TRIGGER_TOKENS: int = int(getattr(settings, "L1_TRIGGER_TOKENS", 2000))
+L1_INCREMENT_TOKENS: int = int(getattr(settings, "L1_INCREMENT_TOKENS", 1000))
 
 _scorer = ImportanceScorer(threshold=0.35)
 
@@ -51,22 +51,23 @@ async def _call_llm_for_summary(
     OpenRouter üzerinden mevcut özeti yeni mesajlarla güncelleyerek
     inkremental özet üretir.
     Sistem mesajları özete dahil edilmez.
+    filter_important kaldırıldı — tüm user/assistant mesajları gönderiliyor.
     """
     if not getattr(settings, "OPENROUTER_API_KEY", None):
         logger.warning("OPENROUTER_API_KEY eksik, L1 özet üretilemiyor")
         return previous_summary
 
-    # ── Sistem mesajlarını dışla ──────────────────────────────────────────
+    # Sistem mesajlarını dışla
     user_assistant_msgs = _exclude_system(messages_for_summary)
 
-    # Önem filtresi: sadece kritik mesajları özetle gönder
-    important_msgs = _scorer.filter_important(user_assistant_msgs)
-    if not important_msgs and not previous_summary:
+    # Hiç mesaj yoksa ve önceki özet de yoksa boş dön
+    if not user_assistant_msgs and not previous_summary:
         return ""
 
+    # Tüm user/assistant mesajlarını LLM'e gönder (filtre yok)
     messages_text = "\n".join(
         f"[{m['role'].upper()}]: {str(m.get('content', ''))[:400]}"
-        for m in important_msgs[-30:]
+        for m in user_assistant_msgs[-30:]
     )
 
     system_content = (
@@ -167,9 +168,9 @@ class L1MemoryManager:
         self.db.commit()
 
     def needs_update(self, conversation_id: int, user_id: int, current_tokens: int) -> bool:
-        record = self._create_or_get(conversation_id, user_id)
+        record = self._get_record(conversation_id)
 
-        if record.summary_version == 0:
+        if record is None or record.summary_version == 0:
             return current_tokens >= L1_TRIGGER_TOKENS
 
         tokens_since_last = current_tokens - record.last_summary_at_tokens
@@ -183,14 +184,12 @@ class L1MemoryManager:
         current_total_tokens: int,
     ) -> bool:
         """
-        Token eşiği aşıldıysa özeti asenkron olarak günceller.
+        Token eşiği aşıldıysa özeti günceller.
         Sistem mesajları özete ve key_facts'e dahil edilmez.
 
         Returns:
             True → özet güncellendi, False → güncelleme gerekmedi
         """
-        from app.memory.models.chat_room_memory import ChatRoomMemory
-
         record = self._create_or_get(conversation_id, user_id)
         record.total_tokens = current_total_tokens
 
@@ -210,11 +209,11 @@ class L1MemoryManager:
         if record.summary and isinstance(record.summary, dict):
             previous_summary = record.summary.get("text", "")
 
-        # ── Sistem mesajlarını dışla, sonra key_facts üret ────────────────
+        # Sistem mesajlarını dışla, key_facts üret
         user_assistant_msgs = _exclude_system(messages)
         key_facts = _scorer.extract_key_facts(user_assistant_msgs, max_facts=15)
 
-        # LLM ile özet güncelle (sistem mesajları zaten _call_llm içinde dışlanıyor)
+        # LLM ile özet güncelle
         new_summary_text = await _call_llm_for_summary(messages, previous_summary)
 
         # Kayıt güncelle

@@ -177,7 +177,7 @@ async def _update_global_profile_with_llm(
                         {"role": "user", "content": user_content},
                     ],
                     "temperature": 0.1,
-                    "max_tokens": 600,
+                    "max_tokens": 1000,
                 },
             )
             r.raise_for_status()
@@ -321,10 +321,6 @@ def trigger_l2_update(user_id: int) -> None:
 
 
 def get_l2_context_string(db: Any, user_id: int) -> str:
-    """
-    chat.py'nin sistem promptuna ekleyeceği L2 bağlam metnini döndürür.
-    Bu fonksiyon request db'sini kullanır — sadece okuma yaptığı için sorun yok.
-    """
     from app.models.user import User
 
     user = db.query(User).filter(User.id == user_id).first()
@@ -339,7 +335,7 @@ def get_l2_context_string(db: Any, user_id: int) -> str:
 
     interests = profile.get("interests", [])
     if interests:
-        parts.append("İlgi Alanları: " + ", ".join(interests[:5]))
+        parts.append("İlgi Alanları: " + ", ".join(interests[:8]))
 
     tech_stack = profile.get("technical_stack", [])
     if tech_stack:
@@ -347,7 +343,7 @@ def get_l2_context_string(db: Any, user_id: int) -> str:
 
     decisions = profile.get("decisions", [])
     if decisions:
-        parts.append("Önceki Kararlar:\n" + "\n".join(f"- {d}" for d in decisions[:5]))
+        parts.append("Kullanıcıya Ait Bilgiler:\n" + "\n".join(f"- {d}" for d in decisions[:10]))
 
     style = profile.get("style", "")
     if style:
@@ -355,7 +351,7 @@ def get_l2_context_string(db: Any, user_id: int) -> str:
 
     last_topics = profile.get("last_topics", [])
     if last_topics:
-        parts.append("Son Konular: " + ", ".join(last_topics[:5]))
+        parts.append("Son Konuşulan Konular: " + ", ".join(last_topics[:5]))
 
     if not parts:
         return ""
